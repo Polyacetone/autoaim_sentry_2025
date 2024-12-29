@@ -1,15 +1,9 @@
 autoaim_detection:
   ros__parameters:
-    # 订阅的img topic
     image_topic: "/camera/color/image_raw"
-
-    # 订阅的Camera参数 topic
     camera_info_topic: "/camera/color/camera_info"
-
-    # 发布的检测结果 topic
     detection_topic: "/detection"
     image_detected_topic: "/camera/color/image_detection"
-
     enemy_info_topic: "/decision/cloud_left"
 
     # 模型参数
@@ -18,31 +12,5 @@ autoaim_detection:
     num_tag: 9
     confidence_threshold: 0.5
     nms_threshold: 0.4
-
-    # traditional 参数
-    marker_width_diff_ratio: 0.6
-    marker_parallel_angle: 18.0
-    marker_vertical_angle: 60.0
-    marker_direction_angle: 50.0
-
-    # range min max
-    min_contour_size: 20
-    max_contour_size: 1000
-    min_led_width: 2
-    max_led_width: 140
-    min_led_ratio: 1.5
-    max_led_ratio: 30.0
-    min_marker_width: 10.0
-    max_marker_width: 700.0
-    min_marker_ratio: 1.2
-    max_marker_ratio: 8.6
-
-    #
-    # camera_to_spindle_x_front: 160.07
-    # camera_to_spindle_y_front: -13.91
-    # camera_to_spindle_z_front: -157.9
-    # camera_to_spindle_x_back: 148.72
-    # camera_to_spindle_y_back: -3.64
-    # camera_to_spindle_z_back: -97.31
 
     enable_debug: true

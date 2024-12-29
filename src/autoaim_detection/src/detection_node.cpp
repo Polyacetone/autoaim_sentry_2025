@@ -35,11 +35,11 @@ public:
         nms_threshold_ = this->get_parameter("nms_threshold").as_double();
         enemy_info_topic_ = this->get_parameter("enemy_info_topic").as_string();
         enable_debug_ = this->get_parameter("enable_debug").as_bool();
-
-        RCLCPP_INFO(this->get_logger(), "img_topic: %s", img_topic_.c_str());
-        RCLCPP_INFO(this->get_logger(), "cam_info_topic: %s", cam_info_topic_.c_str());
-        RCLCPP_INFO(this->get_logger(), "detection_topic: %s", detection_topic_.c_str());
+ 
         if (enable_debug_) {
+            RCLCPP_INFO(this->get_logger(), "img_topic: %s", img_topic_.c_str());
+            RCLCPP_INFO(this->get_logger(), "cam_info_topic: %s", cam_info_topic_.c_str());
+            RCLCPP_INFO(this->get_logger(), "detection_topic: %s", detection_topic_.c_str());
             RCLCPP_INFO(
                 this->get_logger(),
                 "Debug enabled. img_detected_topic: %s",

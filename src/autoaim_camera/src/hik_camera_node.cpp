@@ -20,7 +20,8 @@
 #define TIME_END(TAG) \
     auto end = std::chrono::steady_clock::now(); \
     float durt = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count(); \
-    RCLCPP_INFO(this->get_logger(), "*** << %s >> cost  %f ms ***", TAG, durt / 1000);
+    if (enable_debug_) \
+        RCLCPP_INFO(this->get_logger(), "*** << %s >> cost  %f ms ***", TAG, durt / 1000);
 
 enum MODE : int {
     ARMOR_MODE = 0,
@@ -91,6 +92,7 @@ private:
     float gain_;
     rclcpp::Publisher<builtin_interfaces::msg::Time>::SharedPtr time_publisher_;
     bool enable_debug_;
+    bool use_sensor_data_qos_;
 
     OnSetParametersCallbackHandle::SharedPtr params_callback_handle_;
     rclcpp::Subscription<autoaim_interfaces::msg::CommRecv>::SharedPtr sub_comm_;
@@ -114,15 +116,13 @@ void HikCameraNode::set_mode(int mode) {
         catch_error(MV_CC_SetBoolValue(cam_handle_, "GammaEnable", false));
         catch_error(MV_CC_SetFloatValue(cam_handle_, "ExposureTime", param_.exposure));
         catch_error(MV_CC_SetFloatValue(cam_handle_, "Gain", param_.gain));
-        RCLCPP_INFO(this->get_logger(), "曝光时间: %d", param_.exposure);
-        RCLCPP_INFO(this->get_logger(), "增益: %f", param_.gain);
-        RCLCPP_INFO(this->get_logger(), "set ok");
+        RCLCPP_INFO(this->get_logger(), "set exposure time to: %d", param_.exposure);
+        RCLCPP_INFO(this->get_logger(), "set gain to: %f", param_.gain);
     }
     mode_ = mode;
 }
 
 HikCameraNode::HikCameraNode(const rclcpp::NodeOptions& options): Node("hik_camera", options) {
-    
     declare_parameters();
     sub_comm_ = this->create_subscription<autoaim_interfaces::msg::CommRecv>(
         enemy_info_topic_,
@@ -188,16 +188,27 @@ void HikCameraNode::open_cam() {
                 camera_idx = i;
                 break;
             }
-            RCLCPP_INFO(this->get_logger(), "camera <%s> detected", name.c_str());
+            RCLCPP_WARN(
+                this->get_logger(),
+                "camera <%s> detected, but not <%s>",
+                name.c_str(),
+                param_.camera_name.c_str()
+            );
         }
-        if (camera_idx != -1)
+        if (camera_idx != -1) {
+            RCLCPP_INFO(this->get_logger(), "camera <%s> found", param_.camera_name.c_str());
             break;
-        RCLCPP_INFO(this->get_logger(), "camera <%s> not found", param_.camera_name.c_str());
+        }
+        RCLCPP_WARN(
+            this->get_logger(),
+            "camera <%s> not found, retry in 1s",
+            param_.camera_name.c_str()
+        );
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
     catch_error(MV_CC_CreateHandle(&cam_handle_, devices_list.pDeviceInfo[camera_idx]));
     if (catch_error(MV_CC_IsDeviceConnected(cam_handle_))) {
-        RCLCPP_WARN(this->get_logger(), "相机全死里面啦, 等我重开一下😡");
+        RCLCPP_ERROR(this->get_logger(), "相机全死里面啦, 等我重开一下😡");
         catch_error(MV_CC_OpenDevice(cam_handle_));
         catch_error(MV_CC_CloseDevice(cam_handle_));
     }
@@ -220,9 +231,7 @@ void HikCameraNode::open_cam() {
         catch_error(MV_CC_SetBoolValue(cam_handle_, "GammaEnable", false));
     }
 
-    bool use_sensor_data_qos = this->declare_parameter("use_sensor_data_qos", false);
-    RCLCPP_INFO(this->get_logger(), "use_sensor_data_qos: %d", use_sensor_data_qos);
-    auto qos = use_sensor_data_qos ? rmw_qos_profile_sensor_data : rmw_qos_profile_default;
+    auto qos = use_sensor_data_qos_ ? rmw_qos_profile_sensor_data : rmw_qos_profile_default;
     camera_pub_ = image_transport::create_camera_publisher(this, img_pub_topic_, qos);
 
     // 连续采集模式
@@ -234,7 +243,6 @@ void HikCameraNode::open_cam() {
         // 自动模式 0:关闭 1:一次 2:连续
         catch_error(MV_CC_SetEnumValue(cam_handle_, "GainAuto", 0));
         catch_error(MV_CC_SetFloatValue(cam_handle_, "Gain", 16));
-
         catch_error(MV_CC_SetIntValue(cam_handle_, "AutoExposureTimeLowerLimit", 1000));
         catch_error(MV_CC_SetIntValue(cam_handle_, "AutoExposureTimeUpperLimit", 5000));
         catch_error(MV_CC_SetEnumValue(cam_handle_, "ExposureAuto", 2));
@@ -256,12 +264,9 @@ void HikCameraNode::open_cam() {
     // 设置分辨率
     catch_error(MV_CC_SetIntValue(cam_handle_, "Width", 1440));
     catch_error(MV_CC_SetIntValue(cam_handle_, "Height", 864));
-
     this->set_parameter(rclcpp::Parameter("camera_width", 1440));
     this->set_parameter(rclcpp::Parameter("camera_height", 864));
-
     catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetY", camera_offset_y_));
-
     // 开始取流
     catch_error(MV_CC_StartGrabbing(cam_handle_));
     // 给时间自动曝光，1s后固定曝光和增益值
@@ -284,22 +289,22 @@ void HikCameraNode::open_cam() {
 }
 
 void HikCameraNode::declare_parameters() {
-    this->declare_parameter<std::string>("camera_name", "auto");
-    this->declare_parameter<bool>("auto_exposure", true);
-    this->declare_parameter<int>("brightness", 128);
-    this->declare_parameter<int>("exposure", 2000);
-    this->declare_parameter<double>("gain", 16);
-    this->declare_parameter<bool>("enable_gamma", false);
-    this->declare_parameter<std::string>("img_pub_topic", "camera/image_raw");
-    this->declare_parameter<int>("rate", 500);
-    this->declare_parameter<int>("mode", 0);
+    this->declare_parameter("camera_name", "auto");
+    this->declare_parameter("auto_exposure", true);
+    this->declare_parameter("brightness", 128);
+    this->declare_parameter("exposure", 2000);
+    this->declare_parameter("gain", 16.0);
+    this->declare_parameter("enable_gamma", false);
+    this->declare_parameter("img_pub_topic", "camera/image_raw");
+    this->declare_parameter("rate", 500);
+    this->declare_parameter("mode", 0);
     this->declare_parameter("camera_width", 1440);
     this->declare_parameter("camera_height", 864);
     this->declare_parameter("camera_offset_y", 216);
     this->declare_parameter("enemy_info_topic", "/serial/comm_recv");
     this->declare_parameter("current_time_topic", "/current_time");
-    // this->declare_parameter("prefix", "/autoaim");
     this->declare_parameter("enable_debug", false);
+    this->declare_parameter("use_sensor_data_qos", false);
     auto camera_info_url = this->declare_parameter(
         "camera_info_url",
         "package://autoaim_camera/config/camera_info.yaml"
@@ -318,22 +323,22 @@ void HikCameraNode::declare_parameters() {
     img_pub_topic_ = this->get_parameter("img_pub_topic").as_string();
     enemy_info_topic_ = this->get_parameter("enemy_info_topic").as_string();
     current_time_topic_ = this->get_parameter("current_time_topic").as_string();
-    // prefix = this->get_parameter("prefix").as_string();
     enable_debug_ = this->get_parameter("enable_debug").as_bool();
-    // RCLCPP_INFO(this->get_logger(), "prefix: %s", prefix.c_str());
-    img_pub_topic_ = /*prefix + */ img_pub_topic_;
-    current_time_topic_ = /*prefix + */ current_time_topic_;
+    use_sensor_data_qos_ = this->get_parameter("use_sensor_data_qos").as_bool();
 
     param_ = { auto_exposure, camera_name_, brightness, exposure, gain, enable_gamma };
 
-    RCLCPP_INFO(this->get_logger(), "img_pub_topic: %s", img_pub_topic_.c_str());
-    RCLCPP_INFO(this->get_logger(), "camera_name: %s", camera_name_.c_str());
-    RCLCPP_INFO(this->get_logger(), "auto_exposure: %d", auto_exposure);
-    RCLCPP_INFO(this->get_logger(), "brightness: %d", brightness);
-    RCLCPP_INFO(this->get_logger(), "exposure: %d", exposure);
-    RCLCPP_INFO(this->get_logger(), "gain: %f", gain);
-    RCLCPP_INFO(this->get_logger(), "rate: %d", rate_);
-    RCLCPP_INFO(this->get_logger(), "enable_gamma: %d", enable_gamma);
+    if (enable_debug_) {
+        RCLCPP_INFO(this->get_logger(), "img_pub_topic: %s", img_pub_topic_.c_str());
+        RCLCPP_INFO(this->get_logger(), "camera_name: %s", camera_name_.c_str());
+        RCLCPP_INFO(this->get_logger(), "auto_exposure: %d", auto_exposure);
+        RCLCPP_INFO(this->get_logger(), "brightness: %d", brightness);
+        RCLCPP_INFO(this->get_logger(), "exposure: %d", exposure);
+        RCLCPP_INFO(this->get_logger(), "gain: %f", gain);
+        RCLCPP_INFO(this->get_logger(), "rate: %d", rate_);
+        RCLCPP_INFO(this->get_logger(), "enable_gamma: %d", enable_gamma);
+        RCLCPP_INFO(this->get_logger(), "use_sensor_data_qos: %d", use_sensor_data_qos_);
+    }
 
     // Load camera info
     camera_info_manager_ =
@@ -343,7 +348,7 @@ void HikCameraNode::declare_parameters() {
         camera_info_manager_->loadCameraInfo(camera_info_url);
         camera_info_msg_ = camera_info_manager_->getCameraInfo();
     } else {
-        RCLCPP_WARN(this->get_logger(), "Invalid camera info URL: %s", camera_info_url.c_str());
+        RCLCPP_ERROR(this->get_logger(), "Invalid camera info URL: %s", camera_info_url.c_str());
     }
 }
 
@@ -353,7 +358,7 @@ void HikCameraNode::capture_thread() {
     image_msg_.encoding = "rgb8";
     // rclcpp::Rate r(rate_);
     while (rclcpp::ok()) {
-        // TIME_BEGIN();
+        TIME_BEGIN();
         set_mode(decided_mode_);
         image_msg_.header.stamp = this->now();
         int ret_val = MV_CC_GetImageBuffer(cam_handle_, &out_frame, 1000);
@@ -365,7 +370,7 @@ void HikCameraNode::capture_thread() {
             stConvertParam.enSrcPixelType = out_frame.stFrameInfo.enPixelType;
 
             MV_CC_ConvertPixelType(cam_handle_, &stConvertParam);
-            // TIME_END("MV_CC_GetImageBuffer");
+            TIME_END("MV_CC_GetImageBuffer");
 
             image_msg_.height = out_frame.stFrameInfo.nHeight;
             image_msg_.width = out_frame.stFrameInfo.nWidth;
@@ -379,12 +384,13 @@ void HikCameraNode::capture_thread() {
 
             MV_CC_FreeImageBuffer(cam_handle_, &out_frame);
         } else {
-            RCLCPP_WARN(this->get_logger(), "Get buffer failed! ret_val: [%x]", ret_val);
+            RCLCPP_ERROR(this->get_logger(), "Get buffer failed! ret_val: [%x]", ret_val);
             MV_CC_StopGrabbing(cam_handle_);
             MV_CC_StartGrabbing(cam_handle_);
         }
-        if (enable_debug_)
+        if (enable_debug_) {
             RCLCPP_INFO(this->get_logger(), "FPS: %f", util::get_fps());
+        }
     }
 }
 
@@ -395,7 +401,7 @@ HikCameraNode::parameters_callback(const std::vector<rclcpp::Parameter>& paramet
     for (const auto& parameter: parameters) {
         if (parameter.get_name() == "auto_exposure") {
             param_.auto_exposure = parameter.as_bool();
-            RCLCPP_INFO(this->get_logger(), "auto_exposure: %d", param_.auto_exposure);
+            RCLCPP_INFO(this->get_logger(), "set auto_exposure to: %d", param_.auto_exposure);
         }
     }
     return result;

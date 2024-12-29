@@ -1,7 +1,7 @@
 #pragma once
 #include <memory>
 #include <opencv2/opencv.hpp>
-#include <autoaim_interfaces/msg/detection_array.hpp>
+#include <autoaim_interfaces/msg/detection.hpp>
 
 class InferEngine {
 public:

@@ -15,7 +15,7 @@ def generate_launch_description():
 
     set_env_log_format = SetEnvironmentVariable(
         name='RCUTILS_CONSOLE_OUTPUT_FORMAT',
-        value='[{severity}] [{time}]: {message}'
+        value='[{severity}]: {message}'
     )
     
     container = ComposableNodeContainer(

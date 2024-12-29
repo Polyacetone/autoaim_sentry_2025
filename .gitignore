@@ -6,3 +6,4 @@
 /kernel.errors.txt
 
 *.onnx
+.DS_Store
