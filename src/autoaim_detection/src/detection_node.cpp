@@ -35,7 +35,7 @@ public:
         nms_threshold_ = this->get_parameter("nms_threshold").as_double();
         enemy_info_topic_ = this->get_parameter("enemy_info_topic").as_string();
         enable_debug_ = this->get_parameter("enable_debug").as_bool();
- 
+
         if (enable_debug_) {
             RCLCPP_INFO(this->get_logger(), "img_topic: %s", img_topic_.c_str());
             RCLCPP_INFO(this->get_logger(), "cam_info_topic: %s", cam_info_topic_.c_str());
@@ -152,18 +152,20 @@ private:
         infer_engine_->infer();
         infer_engine_->img_postprocess();
         auto detection_vec = infer_engine_->get_detection_vector();
+        if (!enable_debug_) {
+            filter(detection_vec);
+        }
 
-        filter(detection_vec);
         autoaim_interfaces::msg::DetectionArray detection_array;
-        detection_array.armors = detection_vec;
+        detection_array.detections = detection_vec;
         detection_array.header = msg->header;
         detection_pub_->publish(detection_array);
 
         if (enable_debug_) {
-            sensor_msgs::msg::Image::SharedPtr imgDetected =
+            sensor_msgs::msg::Image::SharedPtr img_detected =
                 cv_bridge::CvImage(msg->header, "bgr8", infer_engine_->debug_draw_armors())
                     .toImageMsg();
-            img_detected_pub_->publish(*imgDetected);
+            img_detected_pub_->publish(*img_detected);
         }
     }
 };

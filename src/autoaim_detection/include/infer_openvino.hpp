@@ -299,7 +299,7 @@ void OpenVINOInferEngine::img_postprocess() {
     }
     std::vector<int> result;
     nms(boxes, nmsThreshold, result); // Non-Maximum Suppression (NMS
-    armorMsg.armors.clear();
+    armorMsg.detections.clear();
     int colorMap[] = { COLOR::BLUE, COLOR::RED, COLOR::GRAY, COLOR::PURPLE };
     // std::cout<<"result.size "<<result.size()<<std::endl;
     for (int i = 0; i < result.size(); i++) {
@@ -319,17 +319,17 @@ void OpenVINOInferEngine::img_postprocess() {
         detection.br.y = (det[result[i]].kpts[2].y + heightBias) * ratio;
         detection.tr.x = det[result[i]].kpts[3].x * ratio;
         detection.tr.y = (det[result[i]].kpts[3].y + heightBias) * ratio;
-        armorMsg.armors.push_back(detection);
+        armorMsg.detections.push_back(detection);
     }
 }
 
 cv::Mat OpenVINOInferEngine::debug_draw_armors() {
-    for (int i = 0; i < armorMsg.armors.size(); i++) {
-        autoaim_interfaces::msg::Detection& armor = armorMsg.armors[i];
-        cv::Point2f kpts[4] { cv::Point2f(armor.tl.x, armor.tl.y),
-                              cv::Point2f(armor.bl.x, armor.bl.y),
-                              cv::Point2f(armor.br.x, armor.br.y),
-                              cv::Point2f(armor.tr.x, armor.tr.y) };
+    for (int i = 0; i < armorMsg.detections.size(); i++) {
+        autoaim_interfaces::msg::Detection& detection = armorMsg.detections[i];
+        cv::Point2f kpts[4] { cv::Point2f(detection.tl.x, detection.tl.y),
+                              cv::Point2f(detection.bl.x, detection.bl.y),
+                              cv::Point2f(detection.br.x, detection.br.y),
+                              cv::Point2f(detection.tr.x, detection.tr.y) };
         for (int j = 0; j < 4; j++) {
             kpts[j].y = kpts[j].y - ratio * heightBias;
         }
@@ -339,14 +339,14 @@ cv::Mat OpenVINOInferEngine::debug_draw_armors() {
         }
         // 画出四个角点之间的两两连线
         for (int j = 0; j < 4; j++) {
-            line(showImg, kpts[j], kpts[(j + 1) % 4], colors[armor.color], 2);
+            line(showImg, kpts[j], kpts[(j + 1) % 4], colors[detection.color], 2);
         }
-        line(showImg, kpts[0], kpts[2], colors[armor.color], 2);
-        line(showImg, kpts[1], kpts[3], colors[armor.color], 2);
+        line(showImg, kpts[0], kpts[2], colors[detection.color], 2);
+        line(showImg, kpts[1], kpts[3], colors[detection.color], 2);
         // 保留两位小数
         putText(
             showImg,
-            name[armor.label] + " " + std::to_string(armor.confidence).substr(0, 4),
+            name[detection.label] + " " + std::to_string(detection.confidence).substr(0, 4),
             cv::Point(kpts[0].x - 5, kpts[0].y - 15),
             cv::FONT_HERSHEY_TRIPLEX,
             0.8,
@@ -362,5 +362,5 @@ void OpenVINOInferEngine::set_input_image(const cv::Mat img) {
 }
 
 std::vector<autoaim_interfaces::msg::Detection> OpenVINOInferEngine::get_detection_vector() const {
-    return armorMsg.armors;
+    return armorMsg.detections;
 }

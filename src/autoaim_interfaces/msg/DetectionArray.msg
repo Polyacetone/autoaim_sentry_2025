@@ -1,2 +1,2 @@
 std_msgs/Header header
-Detection[] armors
+Detection[] detections

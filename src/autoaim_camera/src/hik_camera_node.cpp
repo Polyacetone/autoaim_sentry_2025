@@ -269,9 +269,9 @@ void HikCameraNode::open_cam() {
     catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetY", camera_offset_y_));
     // 开始取流
     catch_error(MV_CC_StartGrabbing(cam_handle_));
-    // 给时间自动曝光，1s后固定曝光和增益值
+    // 给时间自动曝光，5s后固定曝光和增益值
     if (param_.auto_exposure) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(5000));
         catch_error(MV_CC_SetEnumValue(cam_handle_, "ExposureAuto", 0));
         catch_error(MV_CC_SetEnumValue(cam_handle_, "GainAuto", 0));
         catch_error(MV_CC_SetEnumValue(cam_handle_, "BalanceWhiteAuto", 0));
@@ -305,7 +305,7 @@ void HikCameraNode::declare_parameters() {
     this->declare_parameter("current_time_topic", "/current_time");
     this->declare_parameter("enable_debug", false);
     this->declare_parameter("use_sensor_data_qos", false);
-    auto camera_info_url = this->declare_parameter(
+    std::string camera_info_url = this->declare_parameter(
         "camera_info_url",
         "package://autoaim_camera/config/camera_info.yaml"
     );
