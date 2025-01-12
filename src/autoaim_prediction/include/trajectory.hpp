@@ -31,8 +31,8 @@ float get_pitch(float y, float z, float v) {
     return pitch_angle;
 }
 
-float yaw_period_correction(float yaw_current) {
-    int round = int(yaw_current * 100.f); // 保留两位小数
+float deg_period_correction(float deg) {
+    int round = int(deg * 100.f); // 保留两位小数
     round = round % 36000;
     if (round < -18000)
         return float(round + 36000.f) / 100.f;
@@ -85,7 +85,7 @@ std::tuple<float, float> get_pitch_air_frac(float z, float y, float v) {
 std::tuple<float, float> get_pitch_yaw(float x, float y, float z, float speed) {
     float pitch, yaw, fly_time;
     std::tie(pitch, fly_time) = get_pitch_air_frac(y, z, speed);
-    yaw = -yaw_period_correction(r2d(atan(x / y)));
+    yaw = -deg_period_correction(r2d(atan(x / y)));
     return std::make_tuple(pitch, yaw);
 }
 

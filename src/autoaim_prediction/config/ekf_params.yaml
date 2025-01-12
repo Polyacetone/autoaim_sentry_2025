@@ -1,0 +1,21 @@
+%YAML:1.0
+---
+
+dt: 0.05 # 单位时间
+
+Standard:
+  init_radius: 0.25 # 初始半径
+  gain: 15 # 测距噪声关于角度的增益倍数
+
+  # 状态转移噪声系数
+  process_noise:
+    displace_high_diff: 3
+    anglar_high_diff: 15
+    height: 0.0001
+    radius: 0.000005
+
+  # 观测噪声系数
+  measure_noise:
+    pose: 0.002
+    distance: 0.1
+    angle: 0.5

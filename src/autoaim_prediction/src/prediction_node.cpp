@@ -7,10 +7,12 @@
 #include <tf2_ros/buffer.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #include <autoaim_interfaces/msg/detection_array.hpp>
 
 #include <pnp_solver.hpp>
-#include <tracker.hpp>
+#include <kf_tracker.hpp>
+#include <ekf_tracker.hpp>
 #include <trajectory.hpp>
 
 using autoaim_interfaces::msg::DetectionArray;
@@ -59,7 +61,8 @@ private:
     std::shared_ptr<rclcpp::Subscription<sensor_msgs::msg::CameraInfo>> camera_info_sub_;
 
     std::shared_ptr<PnPSolver> pnp_solver_;
-    std::shared_ptr<Tracker> tracker_;
+    std::shared_ptr<kf_tracker::Tracker> kf_tracker_;
+    std::shared_ptr<ekf_tracker::StandardEKFTracker> ekf_tracker_;
 };
 
 PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
@@ -69,7 +72,10 @@ PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
     pnp_solver_ = std::make_shared<PnPSolver>();
-    tracker_ = std::make_shared<Tracker>();
+    kf_tracker_ = std::make_shared<kf_tracker::Tracker>();
+    std::string ekf_params_path = ament_index_cpp::get_package_share_directory("autoaim_prediction")
+        + "/config/ekf_params.yaml";
+    ekf_tracker_ = std::make_shared<ekf_tracker::StandardEKFTracker>(ekf_params_path);
 
     get_parameters();
 
@@ -97,7 +103,7 @@ void PredictionNode::get_parameters() {
     filter_distance_ = declare_parameter("filter_distance", 6.0);
     imu_compensate_pitch_ = declare_parameter("imu_compensate_pitch", 1.3);
     imu_compensate_yaw_ = declare_parameter("imu_compensate_yaw", 0.3);
-    t_delay_ = declare_parameter("t_delay", 98.0);
+    t_delay_ = declare_parameter("t_delay", 0.098);
     camera_info_topic_ = declare_parameter("camera_info_topic", "/camera/color/camera_info");
     detection_sub_topic_ = declare_parameter("detection_sub_topic", "/detection");
     comm_pub_topic_ = declare_parameter("comm_pub_topic", "/serial/comm_send");
@@ -159,15 +165,19 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
                     auto armor_to_spindle = get_lastest_transform("spindle", armor_name);
                     const unsigned armor_area =
                         (detection.br.x - detection.tl.x) * (detection.br.y - detection.tl.y);
-                    tracker_->push(armor_to_spindle, armor_area);
+                    // kf_tracker_->push(armor_to_spindle, armor_area);
+                    ekf_tracker_->push(armor_to_spindle, armor_area);
                 }
             }
         }
-        tracker_->update();
-
-        if (tracker_->status == TrackerStatus::TRACKING) {
-            const cv::Point3f predicted =
-                tracker_->predict(debug_prediction_time_ / second_per_frame);
+        // kf_tracker_->update();
+        ekf_tracker_->update();
+        // if (kf_tracker_->tracker_status == kf_tracker::TRACKER_STATUS::TRACKING) {
+        if (ekf_tracker_->tracker_status == ekf_tracker::TRACKER_STATUS::TRACKING) {
+            // const cv::Point3f predicted =
+            //     kf_tracker_->predict(debug_prediction_time_ / second_per_frame);
+            const cv::Point3f predicted = 
+                ekf_tracker_->get_prediction(debug_bullet_speed_, t_delay_);
             geometry_msgs::msg::TransformStamped predicted_to_cam;
             predicted_to_cam.header.stamp = this->now();
             predicted_to_cam.header.frame_id = "spindle";
@@ -177,7 +187,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             predicted_to_cam.transform.translation.z = predicted.z;
             tf_broadcaster_->sendTransform(predicted_to_cam);
 
-            auto predicted_to_fric = get_lastest_transform("fric_wheel", "prediction");
+            /*auto predicted_to_fric = get_lastest_transform("fric_wheel", "prediction");
             float predicted_pitch, predicted_yaw;
             std::tie(predicted_pitch, predicted_yaw) = trajectory::get_pitch_yaw(
                 predicted_to_fric.translation.x,
@@ -185,7 +195,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
                 predicted_to_fric.translation.z,
                 debug_bullet_speed_
             );
-            RCLCPP_INFO(this->get_logger(), "Pitch: %f  Yaw: %f", predicted_pitch, predicted_yaw);
+            RCLCPP_INFO(this->get_logger(), "Pitch: %f  Yaw: %f", predicted_pitch, predicted_yaw);*/
         }
     }
 }

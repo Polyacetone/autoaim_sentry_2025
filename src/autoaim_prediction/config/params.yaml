@@ -22,7 +22,7 @@
     imu_compensate_pitch: 1.3
     imu_compensate_yaw: 0.3
 
-    t_delay: 98.0
+    t_delay: 0.098 # 单位: s
 
     camera_info_topic: "/camera/color/camera_info"
     detection_sub_topic: "/detection"
