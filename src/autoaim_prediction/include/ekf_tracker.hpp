@@ -26,8 +26,6 @@ double get_distance(const cv::Point3f& p) {
     return sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
 }
 
-enum class COLOR { GRAY, BLUE, RED };
-enum class ARMOR_TYPE { NONE, SMALL, LARGE, RUNE };
 enum class TRACKER_STATUS { CONVERGING, TRACKING, TEMP_LOST, LOST };
 
 // 装甲板参数
@@ -35,20 +33,20 @@ class Armor {
 public:
     cv::Point3f position; // 三维坐标信息
     double yaw_angle; // 按yaw轴旋转的角度。单位: rad
-    int area; // 图像中的可视面积。用于排序，选择最优的击打目标
+    int area; // 图像中的可视面积。用于排序装甲板
 };
 using Armors = std::vector<Armor>;
 
-// 状态量
+// 整车的状态量
 class State {
 public:
     State();
 
-    virtual Armors get_armors(double predict_time = 0) = 0;
-    virtual Armor get_closest_armor(double predict_time, double switch_threshold) = 0;
-    virtual Armor get_facing_armor(double predict_time) = 0;
+    virtual Armors predict_armors(const double predict_time) const = 0;
+    virtual Armor predict_closest_armor(const double predict_time, const double switch_threshold) const = 0;
+    virtual Armor predict_facing_armor(const double predict_time) const = 0;
 
-    virtual void print(std::string tag) = 0;
+    virtual void print(const std::string& tag) const = 0;
 
     cv::Point2d center; // 旋转中心位置
     double height[2]; // 装甲高度。0对应索引0、2，1对应索引1、3
@@ -56,8 +54,7 @@ public:
     double phase; // 角度（并非定值）
     double palstance; // 角速度
 
-    int number; // 装甲板数量
-    int index; // 当前目标索引
+    int total_armor_count; // 装甲板数量
 };
 
 // 普通车的状态量
@@ -67,46 +64,39 @@ public:
     StandardState(const Eigen::Matrix<double, 10, 1>& X);
 
     /**
-        @brief 为了保留index，赋值时不继承index
-    */
-    StandardState operator=(const StandardState& status);
-
-    /**
         @brief 获取该运动状态下所有装甲板
         @param predict_time 预测时间
     */
-    Armors get_armors(double predict_time = 0) override;
+    Armors predict_armors(const double predict_time) const override;
 
     /**
         @brief 获取目标装甲板
         @param predict_time 预测时间
         @param switch_threshold 更新装甲板切换的最小距离差
     */
-    Armor get_closest_armor(double predict_time, double switch_threshold) override;
+    Armor predict_closest_armor(const double predict_time, const double switch_threshold) const override;
 
     /**
         @brief 获取正对的装甲板
     */
-    Armor get_facing_armor(double predict_time) override;
+    Armor predict_facing_armor(const double predict_time) const override;
 
     /**
         @brief 打印信息
     */
-    void print(std::string tag) override;
+    void print(const std::string& tag) const override;
 
     cv::Point2d velocity; // 旋转中心速度
 };
 
 State::State() {
-    index = 0;
     height[0] = height[1] = 0;
     radius[0] = radius[1] = 0;
 }
 
 StandardState::StandardState(): StandardState(Eigen::Matrix<double, 10, 1>::Zero()) {}
 StandardState::StandardState(const Eigen::Matrix<double, 10, 1>& X): State() {
-    number = 4;
-
+    total_armor_count = 4;
     center = cv::Point2d(X(0, 0), X(2, 0));
     velocity = cv::Point2d(X(1, 0), X(3, 0));
     height[0] = X(4, 0);
@@ -117,16 +107,9 @@ StandardState::StandardState(const Eigen::Matrix<double, 10, 1>& X): State() {
     palstance = X(9, 0);
 }
 
-StandardState StandardState::operator=(const StandardState& status) {
-    int tmp_index = this->index;
-    *this = status;
-    this->index = tmp_index;
-    return *this;
-}
-
-Armors StandardState::get_armors(double predict_time) {
-    Armors armors(number);
-    for (int i = 0; i < number; i++) {
+Armors StandardState::predict_armors(const double predict_time) const {
+    Armors armors(total_armor_count);
+    for (int i = 0; i < total_armor_count; i++) {
         double angle = rad_period_correction(phase + palstance * predict_time + i * M_PI / 2);
         cv::Point2d point = center + velocity * predict_time
             + cv::Point2d(radius[i % 2] * cos(angle), radius[i % 2] * sin(angle));
@@ -136,7 +119,7 @@ Armors StandardState::get_armors(double predict_time) {
     return armors;
 }
 
-Armor StandardState::get_closest_armor(double predict_time, double switch_threshold) {
+Armor StandardState::predict_closest_armor(const double predict_time, const double switch_threshold) const {
     /**
         我们选择在给定预测时间后在相机系中yaw角度绝对值最小，即面朝我方向最正的一块装甲板作为击打目标
         为了防止数据抖动使得目标在两块角度相近的装甲板之间来回跳变，在取最小值时额外加一小段阈值，即需要比原有的最小值减去该阈值更小才认为是新的最小值
@@ -144,66 +127,67 @@ Armor StandardState::get_closest_armor(double predict_time, double switch_thresh
         另外，为了防止角速度接近0时计算得一个过大的提前量，将上述结果与0.2取较小值
     */
     double switch_advanced_time = std::min(0.2, d2r(switch_threshold) / abs(palstance));
-    Armors armors = get_armors(predict_time + switch_advanced_time);
+    Armors armors = predict_armors(predict_time + switch_advanced_time);
     cv::Point2d predict_center = center + velocity * predict_time;
-    for (int i = 0; i < number; i++) {
+    int min_index = 0;
+    for (int i = 0; i < total_armor_count; i++) {
         if (abs(rad_period_correction(
                 M_PI + armors[i].yaw_angle - atan2(predict_center.y, predict_center.x)
             )) + d2r(switch_threshold)
             < abs(rad_period_correction(
-                M_PI + armors[index].yaw_angle - atan2(predict_center.y, predict_center.x)
+                M_PI + armors[min_index].yaw_angle - atan2(predict_center.y, predict_center.x)
             )))
         {
-            index = i;
+            min_index = i;
         }
     }
-    return get_armors(predict_time)[index];
+    return predict_armors(predict_time)[min_index];
 }
 
-Armor StandardState::get_facing_armor(double predict_time) {
+Armor StandardState::predict_facing_armor(const double predict_time) const {
     Armor armor;
-    Armors armors = get_armors(predict_time);
+    Armors armors = predict_armors(predict_time);
     cv::Point2d predict_center = center + velocity * predict_time;
-    for (int i = 0; i < number; i++) {
+    int min_index = 0;
+    for (int i = 0; i < total_armor_count; i++) {
         if (abs(rad_period_correction(
                 M_PI + armors[i].yaw_angle - atan2(predict_center.y, predict_center.x)
             ))
             < abs(rad_period_correction(
-                M_PI + armors[index].yaw_angle - atan2(predict_center.y, predict_center.x)
+                M_PI + armors[min_index].yaw_angle - atan2(predict_center.y, predict_center.x)
             )))
         {
-            index = i;
+            min_index = i;
         }
     }
 
     // 如果最近的装甲板处于远离状态，则击打下一装甲板
     if (abs(rad_period_correction(
-            M_PI + armors[index].yaw_angle + (palstance / abs(palstance)) * d2r(-50)
+            M_PI + armors[min_index].yaw_angle + (palstance / abs(palstance)) * d2r(-50)
             - atan2(predict_center.y, predict_center.x)
         ))
         < abs(rad_period_correction(
-            M_PI + armors[index].yaw_angle - atan2(predict_center.y, predict_center.x)
+            M_PI + armors[min_index].yaw_angle - atan2(predict_center.y, predict_center.x)
         )))
     {
-        index = (index + 1) % number;
+        min_index = (min_index + 1) % total_armor_count;
     }
     double angle = rad_period_correction(atan2(predict_center.y, predict_center.x) - M_PI);
     armor.position = cv::Point3d(
-        predict_center.x + radius[index % 2] * cos(angle),
-        predict_center.y + radius[index % 2] * sin(angle),
-        height[index % 2]
+        predict_center.x + radius[min_index % 2] * cos(angle),
+        predict_center.y + radius[min_index % 2] * sin(angle),
+        height[min_index % 2]
     );
     armor.yaw_angle = angle;
     return armor;
 }
 
-void StandardState::print(std::string tag) {
+void StandardState::print(const std::string& tag) const {
     std::string prefix = "[StandardState] " + tag + " ";
     std::cout << prefix << "center: " << center << " += " << velocity << std::endl;
     std::cout << prefix << "height: " << height[0] << " " << height[1] << std::endl;
     std::cout << prefix << "radius: " << radius[0] << " " << radius[1] << std::endl;
     std::cout << prefix << "angle: " << phase << " += " << palstance << std::endl;
-    std::cout << prefix << "index: " << index << std::endl;
 }
 
 class EKF {
@@ -218,10 +202,9 @@ public:
     ) = 0;
 
     virtual void reset() = 0;
-    virtual bool is_stable() = 0;
 
 protected:
-    virtual void load_param(const std::string& file_path) = 0;
+    virtual void load_params(const std::string& file_path) = 0;
 
     virtual Eigen::MatrixXd get_predictive_measurement(const Eigen::MatrixXd& X, int i) = 0;
     virtual Eigen::MatrixXd get_measurement_PD(const Eigen::MatrixXd& X, int i) = 0;
@@ -279,17 +262,12 @@ public:
     */
     void reset() override;
 
-    /**
-        @return 模型是否稳定
-    */
-    bool is_stable() override;
-
 private:
     /**
         @brief 读取参数配置文件
         @param file_path 配置文件路径
     */
-    void load_param(const std::string& file_path) override;
+    void load_params(const std::string& file_path) override;
 
     /**
         @brief 获取先验观测量
@@ -319,7 +297,7 @@ private:
 };
 
 StandardEKF::StandardEKF(const std::string& params_path): EKF() {
-    load_param(params_path);
+    load_params(params_path);
     reset();
 
     m_F << 
@@ -363,21 +341,21 @@ StandardEKF::StandardEKF(const std::string& params_path): EKF() {
     m_RR = measurement_noise8.asDiagonal();
 }
 
-void StandardEKF::load_param(const std::string& file_path) {
+void StandardEKF::load_params(const std::string& file_path) {
     cv::FileStorage fs(file_path, cv::FileStorage::READ);
     fs["dt"] >> m_dt;
 
-    fs["Standard"]["init_radius"] >> m_init_radius;
-    fs["Standard"]["gain"] >> m_gain;
+    fs["StandardEKF"]["init_radius"] >> m_init_radius;
+    fs["StandardEKF"]["gain"] >> m_gain;
 
-    fs["Standard"]["process_noise"]["displace_high_diff"] >> m_process_noise[0];
-    fs["Standard"]["process_noise"]["anglar_high_diff"] >> m_process_noise[1];
-    fs["Standard"]["process_noise"]["height"] >> m_process_noise[2];
-    fs["Standard"]["process_noise"]["radius"] >> m_process_noise[3];
+    fs["StandardEKF"]["process_noise"]["displace_high_diff"] >> m_process_noise[0];
+    fs["StandardEKF"]["process_noise"]["anglar_high_diff"] >> m_process_noise[1];
+    fs["StandardEKF"]["process_noise"]["height"] >> m_process_noise[2];
+    fs["StandardEKF"]["process_noise"]["radius"] >> m_process_noise[3];
 
-    fs["Standard"]["measure_noise"]["pose"] >> m_measure_noise[0];
-    fs["Standard"]["measure_noise"]["distance"] >> m_measure_noise[1];
-    fs["Standard"]["measure_noise"]["angle"] >> m_measure_noise[2];
+    fs["StandardEKF"]["measure_noise"]["pose"] >> m_measure_noise[0];
+    fs["StandardEKF"]["measure_noise"]["distance"] >> m_measure_noise[1];
+    fs["StandardEKF"]["measure_noise"]["angle"] >> m_measure_noise[2];
     fs.release();
 
     m_X.resize(10, 1);
@@ -473,11 +451,6 @@ std::shared_ptr<State> StandardEKF::update(
     return std::make_shared<StandardState>(m_X);
 }
 
-bool StandardEKF::is_stable() {
-    // TODO...
-    return true;
-}
-
 Eigen::MatrixXd StandardEKF::get_predictive_measurement(const Eigen::MatrixXd& X, int i) {
     Eigen::Matrix<double, 4, 1> h;
     h << X(0, 0) + X(6 + i % 2, 0) * cos(X(8, 0) + i * M_PI / 2),
@@ -519,6 +492,7 @@ public:
     TRACKER_STATUS tracker_status = TRACKER_STATUS::LOST;
 
 private:
+    void load_params(const std::string& file_path);
     void ekf_initialize();
     void ekf_predict();
     void ekf_update();
@@ -535,6 +509,9 @@ private:
 
     const unsigned int MAX_LOST_FRAMES = 5;
     const unsigned int CONVERGE_FRAMES = 5;
+    double m_switch_threshold_ = 15;
+    double m_match_score_threshold_ = 1.0;
+
     unsigned int tracking_frames_;
     unsigned int lost_frames_;
 
@@ -547,6 +524,7 @@ private:
 };
 
 StandardEKFTracker::StandardEKFTracker(const std::string& params_path) {
+    load_params(params_path);
     ekf_ = std::make_shared<StandardEKF>(params_path);
 }
 
@@ -572,48 +550,50 @@ void StandardEKFTracker::push(
 
 void StandardEKFTracker::update() {
     using TS = TRACKER_STATUS;
-
     if (armors_.empty() || armors_.size() > 2) {
         tracking_frames_ = 0;
         lost_frames_++;
         if (tracker_status != TS::LOST) {
             ekf_predict();
+            if (lost_frames_ >= MAX_LOST_FRAMES) {
+                tracker_status = TS::LOST;
+            } else {
+                tracker_status = TS::TEMP_LOST;
+            }
         }
-        if (lost_frames_ >= MAX_LOST_FRAMES) {
-            tracker_status = TS::LOST;
+    } else {
+        lost_frames_ = 0;
+        tracking_frames_++;
+        if (tracker_status == TS::LOST) {
+            ekf_initialize();
+            ekf_predict();
         } else {
-            tracker_status = TS::TEMP_LOST;
+            ekf_predict();
+            ekf_update();
         }
-        return;
+        if (tracking_frames_ >= CONVERGE_FRAMES) {
+            tracker_status = TS::TRACKING;
+        } else {
+            tracker_status = TS::CONVERGING;
+        }
     }
-
-    lost_frames_ = 0;
-    tracking_frames_++;
-
-    if (tracker_status == TS::LOST) {
-        ekf_initialize();
-        ekf_predict();
-    } else {
-        ekf_predict();
-        ekf_update();
-    }
-    if (tracking_frames_ >= CONVERGE_FRAMES) {
-        tracker_status = TS::TRACKING;
-    } else {
-        tracker_status = TS::CONVERGING;
-    }
-
     armors_.clear();
 }
 
 cv::Point3f StandardEKFTracker::get_prediction(const double bullet_speed, const double t_delay) {
     const auto state = get_state();
+    assert(state != nullptr); // 不应该在tracker_status为LOST时调用get_prediction
     // 一阶线性化，粗略估计击打时间。
     const double hit_time =
-        get_distance(state->get_closest_armor(0, 0).position) / bullet_speed + t_delay;
-    // switch_threshold=15: 更新装甲板切换的角度阈值，角度制。TODO: 参数化
-    const cv::Point3f p = state->get_closest_armor(hit_time, 15).position;
+        get_distance(state->predict_closest_armor(0, 0).position) / bullet_speed + t_delay;
+    const cv::Point3f p = state->predict_closest_armor(hit_time, m_switch_threshold_).position;
     return cv::Point3f(-p.y, p.x, p.z);
+}
+
+void StandardEKFTracker::load_params(const std::string& file_path) {
+    cv::FileStorage fs(file_path, cv::FileStorage::READ);
+    fs["StandardEKFTracker"]["switch_threshold"] >> m_switch_threshold_;
+    fs["StandardEKFTracker"]["match_score_threshold"] >> m_match_score_threshold_;
 }
 
 void StandardEKFTracker::ekf_initialize() {
@@ -626,13 +606,12 @@ void StandardEKFTracker::ekf_predict() {
     });
     prior_mats_ = ekf_->predict(armors_);
     prior_state_ = std::make_shared<StandardState>(prior_mats_.first);
-    posterior_state_ = prior_state_;
 }
 
 void StandardEKFTracker::ekf_update() {
-    Eigen::MatrixXd score = get_score_mat(armors_, prior_state_->get_armors(0));
+    Eigen::MatrixXd score = get_score_mat(armors_, prior_state_->predict_armors(0));
     std::map<int, int> match =
-        get_match(score, 1.0, prior_state_->number); // 1.0是最大允许的score。TODO: 参数化
+        get_match(score, m_match_score_threshold_, prior_state_->total_armor_count);
     posterior_state_ = ekf_->update(armors_, prior_mats_.first, prior_mats_.second, match);
 }
 

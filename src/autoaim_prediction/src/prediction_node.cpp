@@ -20,6 +20,15 @@ using autoaim_interfaces::msg::DetectionArray;
 double to_sec(builtin_interfaces::msg::Time t) {
     return t.sec + t.nanosec * 1e-9;
 }
+std::string get_tf_armor_name(int color, int label, int index) {
+    std::string name;
+    char color_map[3] = {'G', 'B', 'R'}; // gray, blue, red
+    name += color_map[color];
+    name += static_cast<char>(label + '0');
+    name += '-';
+    name += static_cast<char>(index + '0');
+    return name;
+}
 
 namespace autoaim_prediction {
 class PredictionNode: public rclcpp::Node {
@@ -145,14 +154,15 @@ void PredictionNode::get_parameters() {
 
 void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) const {
     if (enable_debug_ && debug_mode_ == false) {
-        static std::chrono::steady_clock::time_point prev_time;
-        const auto now_time = std::chrono::steady_clock::now();
-        const float second_per_frame = std::chrono::duration<float>(now_time - prev_time).count();
-        prev_time = now_time;
-
+        int armor_count = 0; // 当前画面中存在的目标装甲板数目
         for (const auto& detection: msg->detections) {
-            if (debug_target_color_ == 0 || detection.color == debug_target_color_) {
-                std::string armor_name = std::to_string(detection.color * 10 + detection.label);
+            if ((debug_target_color_ == 0 || detection.color == debug_target_color_)
+                && detection.label == debug_target_armor_)
+            {
+                armor_count++;
+                // 只是因为tf中两个装甲板不应重名，所以按出现的次序编号。这个编号对后续处理无影响。
+                const std::string armor_name =
+                    get_tf_armor_name(detection.color, detection.label, armor_count);
                 geometry_msgs::msg::TransformStamped armor_to_cam;
                 armor_to_cam.header.stamp = this->now();
                 armor_to_cam.header.frame_id = "autoaim_camera";
@@ -161,33 +171,26 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
                 pnp_solver_->solve_pnp(detection, armor_to_cam.transform);
                 tf_broadcaster_->sendTransform(armor_to_cam);
 
-                if (detection.label == debug_target_armor_) {
-                    auto armor_to_spindle = get_lastest_transform("spindle", armor_name);
-                    const unsigned armor_area =
-                        (detection.br.x - detection.tl.x) * (detection.br.y - detection.tl.y);
-                    // kf_tracker_->push(armor_to_spindle, armor_area);
-                    ekf_tracker_->push(armor_to_spindle, armor_area);
-                }
+                auto armor_to_spindle = get_lastest_transform("spindle", armor_name);
+                const int armor_area =
+                    (detection.br.x - detection.tl.x) * (detection.br.y - detection.tl.y);
+                ekf_tracker_->push(armor_to_spindle, armor_area);
             }
         }
-        // kf_tracker_->update();
         ekf_tracker_->update();
-        // if (kf_tracker_->tracker_status == kf_tracker::TRACKER_STATUS::TRACKING) {
         if (ekf_tracker_->tracker_status == ekf_tracker::TRACKER_STATUS::TRACKING) {
-            // const cv::Point3f predicted =
-            //     kf_tracker_->predict(debug_prediction_time_ / second_per_frame);
-            const cv::Point3f predicted = 
+            const cv::Point3f predicted =
                 ekf_tracker_->get_prediction(debug_bullet_speed_, t_delay_);
             geometry_msgs::msg::TransformStamped predicted_to_cam;
             predicted_to_cam.header.stamp = this->now();
             predicted_to_cam.header.frame_id = "spindle";
-            predicted_to_cam.child_frame_id = "prediction";
+            predicted_to_cam.child_frame_id = "target";
             predicted_to_cam.transform.translation.x = predicted.x;
             predicted_to_cam.transform.translation.y = predicted.y;
             predicted_to_cam.transform.translation.z = predicted.z;
             tf_broadcaster_->sendTransform(predicted_to_cam);
 
-            /*auto predicted_to_fric = get_lastest_transform("fric_wheel", "prediction");
+            auto predicted_to_fric = get_lastest_transform("fric_wheel", "target");
             float predicted_pitch, predicted_yaw;
             std::tie(predicted_pitch, predicted_yaw) = trajectory::get_pitch_yaw(
                 predicted_to_fric.translation.x,
@@ -195,7 +198,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
                 predicted_to_fric.translation.z,
                 debug_bullet_speed_
             );
-            RCLCPP_INFO(this->get_logger(), "Pitch: %f  Yaw: %f", predicted_pitch, predicted_yaw);*/
+            RCLCPP_INFO(this->get_logger(), "Pitch: %f  Yaw: %f", predicted_pitch, predicted_yaw);
         }
     }
 }

@@ -3,7 +3,7 @@
 
 dt: 0.05 # 单位时间
 
-Standard:
+StandardEKF:
   init_radius: 0.25 # 初始半径
   gain: 15 # 测距噪声关于角度的增益倍数
 
@@ -19,3 +19,7 @@ Standard:
     pose: 0.002
     distance: 0.1
     angle: 0.5
+
+StandardEKFTracker:
+  switch_threshold: 15 # 更新装甲板切换的角度阈值，角度制。
+  match_score_threshold: 1.0 # get_match中最大允许的score。
