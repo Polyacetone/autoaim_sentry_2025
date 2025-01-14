@@ -11,6 +11,7 @@
 #include <autoaim_interfaces/msg/detection_array.hpp>
 
 #include <pnp_solver.hpp>
+#include <trisection_yaw.hpp>
 #include <kf_tracker.hpp>
 #include <ekf_tracker.hpp>
 #include <trajectory.hpp>
@@ -70,6 +71,7 @@ private:
     std::shared_ptr<rclcpp::Subscription<sensor_msgs::msg::CameraInfo>> camera_info_sub_;
 
     std::shared_ptr<PnPSolver> pnp_solver_;
+    std::shared_ptr<TrisectionYaw> trisection_yaw_;
     std::shared_ptr<kf_tracker::Tracker> kf_tracker_;
     std::shared_ptr<ekf_tracker::StandardEKFTracker> ekf_tracker_;
 };
@@ -80,7 +82,9 @@ PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+
     pnp_solver_ = std::make_shared<PnPSolver>();
+    trisection_yaw_ = std::make_shared<TrisectionYaw>();
     kf_tracker_ = std::make_shared<kf_tracker::Tracker>();
     std::string ekf_params_path = ament_index_cpp::get_package_share_directory("autoaim_prediction")
         + "/config/ekf_params.yaml";
@@ -167,8 +171,8 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
                 armor_to_cam.header.stamp = this->now();
                 armor_to_cam.header.frame_id = "autoaim_camera";
                 armor_to_cam.child_frame_id = armor_name;
-
                 pnp_solver_->solve_pnp(detection, armor_to_cam.transform);
+                trisection_yaw_->get_yaw(detection, armor_to_cam.transform);
                 tf_broadcaster_->sendTransform(armor_to_cam);
 
                 auto armor_to_spindle = get_lastest_transform("spindle", armor_name);
@@ -205,6 +209,10 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
 
 void PredictionNode::camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg) {
     pnp_solver_->set_cam_matrix(
+        cv::Mat(3, 3, CV_64F, msg->k.data()),
+        cv::Mat(1, 5, CV_64F, msg->d.data())
+    );
+    trisection_yaw_->set_cam_matrix(
         cv::Mat(3, 3, CV_64F, msg->k.data()),
         cv::Mat(1, 5, CV_64F, msg->d.data())
     );

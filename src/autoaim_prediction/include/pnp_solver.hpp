@@ -10,7 +10,7 @@
 
 class PnPSolver {
 public:
-    void solve_pnp(
+    bool solve_pnp(
         const autoaim_interfaces::msg::Detection& detection,
         geometry_msgs::msg::Transform& transform
     ) const {
@@ -21,23 +21,32 @@ public:
             {detection.br.x, detection.br.y},
             {detection.tr.x, detection.tr.y}
         };
-        cv::Mat rvec, tvec;
-        cv::solvePnP(
+        std::vector<cv::Mat> rvecs, tvecs;
+        const int solutions = cv::solvePnPGeneric(
             world_points,
             img_points,
             cam_intrinsic_,
             cam_distortion_,
-            rvec,
-            tvec,
+            rvecs,
+            tvecs,
             false,
             cv::SOLVEPNP_IPPE
         );
-        transform.translation.x = tvec.at<double>(0);
-        transform.translation.y = tvec.at<double>(1);
-        transform.translation.z = tvec.at<double>(2);
+        // IPPE返回两组对称解，这里筛选z大于0（即在相机前面）的返回
+        int solution_index = 0;
+        if (solutions >= 1 && tvecs[0].at<double>(2) > 0) {
+            solution_index = 0;
+        } else if (solutions >= 2 && tvecs[1].at<double>(2) > 0) {
+            solution_index = 1;
+        } else {
+            return 1;
+        }
+        transform.translation.x = tvecs[solution_index].at<double>(0);
+        transform.translation.y = tvecs[solution_index].at<double>(1);
+        transform.translation.z = tvecs[solution_index].at<double>(2);
 
         cv::Mat rodrigues;
-        cv::Rodrigues(rvec, rodrigues);
+        cv::Rodrigues(rvecs[solution_index], rodrigues);
         tf2::Matrix3x3 rotation_matrix(
             rodrigues.at<double>(0, 0), rodrigues.at<double>(0, 1), rodrigues.at<double>(0, 2),
             rodrigues.at<double>(1, 0), rodrigues.at<double>(1, 1), rodrigues.at<double>(1, 2),
@@ -49,6 +58,7 @@ public:
         transform.rotation.y = quaternion.getY();
         transform.rotation.z = quaternion.getZ();
         transform.rotation.w = quaternion.getW();
+        return 0;
     }
 
     void set_cam_matrix(const cv::Mat intrinsic, const cv::Mat distortion) {
@@ -59,7 +69,6 @@ public:
     PnPSolver() = default;
     ~PnPSolver() = default;
 
-private:
     // 单位: 米
     static constexpr float HEIGHT = 0.055;
     static constexpr float BIG_WIDTH = 0.2253;
