@@ -244,7 +244,7 @@ void HikCameraNode::open_cam() {
         catch_error(MV_CC_SetEnumValue(cam_handle_, "GainAuto", 0));
         catch_error(MV_CC_SetFloatValue(cam_handle_, "Gain", 16));
         catch_error(MV_CC_SetIntValue(cam_handle_, "AutoExposureTimeLowerLimit", 1000));
-        catch_error(MV_CC_SetIntValue(cam_handle_, "AutoExposureTimeUpperLimit", 5000));
+        catch_error(MV_CC_SetIntValue(cam_handle_, "AutoExposureTimeUpperLimit", 3000));
         catch_error(MV_CC_SetEnumValue(cam_handle_, "ExposureAuto", 2));
         catch_error(MV_CC_SetIntValue(cam_handle_, "Brightness", param_.brightness));
         // catch_error(MV_CC_SetEnumValue(cam_handle_, "GainAuto", 2))
@@ -269,9 +269,9 @@ void HikCameraNode::open_cam() {
     catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetY", camera_offset_y_));
     // 开始取流
     catch_error(MV_CC_StartGrabbing(cam_handle_));
-    // 给时间自动曝光，5s后固定曝光和增益值
+    // 给时间自动曝光，1s后固定曝光和增益值
     if (param_.auto_exposure) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         catch_error(MV_CC_SetEnumValue(cam_handle_, "ExposureAuto", 0));
         catch_error(MV_CC_SetEnumValue(cam_handle_, "GainAuto", 0));
         catch_error(MV_CC_SetEnumValue(cam_handle_, "BalanceWhiteAuto", 0));

@@ -1,7 +1,7 @@
 %YAML:1.0
 ---
 
-dt: 0.05 # 单位时间
+dt: 0.01 # 单位时间
 
 StandardEKF:
   init_radius: 0.25 # 初始半径

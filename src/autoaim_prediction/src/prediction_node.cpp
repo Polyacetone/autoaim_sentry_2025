@@ -172,7 +172,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
                 armor_to_cam.header.frame_id = "autoaim_camera";
                 armor_to_cam.child_frame_id = armor_name;
                 pnp_solver_->solve_pnp(detection, armor_to_cam.transform);
-                trisection_yaw_->get_yaw(detection, armor_to_cam.transform);
+                trisection_yaw_->get_rotation(detection, armor_to_cam.transform);
                 tf_broadcaster_->sendTransform(armor_to_cam);
 
                 auto armor_to_spindle = get_lastest_transform("spindle", armor_name);
