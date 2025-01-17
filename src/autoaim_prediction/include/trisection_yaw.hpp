@@ -2,62 +2,12 @@
 
 #pragma once
 
+#include <Eigen/Dense>
 #include <opencv2/opencv.hpp>
-#include <eigen3/Eigen/Dense>
 #include <autoaim_interfaces/msg/detection.hpp>
 #include <geometry_msgs/msg/transform.hpp>
 
-namespace math {
-template<typename T>
-T squre(const T& x) {
-    return x * x;
-}
-
-// 计算两个向量的夹角。返回值介于0~pi。
-double get_angle(const Eigen::Vector2d& vec1, const Eigen::Vector2d& vec2) {
-    if (vec1.norm() == 0.0 || vec2.norm() == 0.0) {
-        return 0.0;
-    }
-    return std::acos(vec1.dot(vec2) / (vec1.norm() * vec2.norm()));
-}
-
-// 将角度（弧度制）限制在-pi~pi之间。
-double rad_period_correction(double rad) {
-    return rad + round((-rad) / (2 * M_PI)) * (2 * M_PI);
-}
-
-// 三分法求函数的最小值。
-std::pair<double, double> trisection_find_min(
-    double left,
-    double right,
-    const std::function<double(double)>& cost_function,
-    const int iterations
-) {
-    double phi = (std::sqrt(5.0) - 1.0) / 2.0;
-    double ml_cost = 0.0, mr_cost = 0.0;
-    int reserved = -1;
-    for (int i = 0; i < iterations; i++) {
-        double ml = left + (right - left) * (1. - phi);
-        double mr = left + (right - left) * phi;
-        if (reserved != 0) {
-            ml_cost = cost_function(ml);
-        }
-        if (reserved != 1) {
-            mr_cost = cost_function(mr);
-        }
-        if (ml_cost < mr_cost) {
-            right = mr;
-            mr_cost = ml_cost;
-            reserved = 1;
-        } else {
-            left = ml;
-            ml_cost = mr_cost;
-            reserved = 0;
-        }
-    }
-    return std::make_pair((left + right) / 2.0, right - left);
-}
-} // namespace math
+#include <math_utils.hpp>
 
 class TrisectionYaw {
 public:
@@ -78,7 +28,7 @@ public:
     void get_rotation(
         const autoaim_interfaces::msg::Detection& detection,
         geometry_msgs::msg::Transform& transform,
-        const double prior_yaw = M_PI / 4
+        const float prior_yaw = M_PI / 4
     ) const;
 
 private:
@@ -88,10 +38,10 @@ private:
         @param rotated_pts 旋转一个角度后，重投影后的角点。
         @param prior_yaw 先验估计的yaw角。
     */
-    double get_pts_cost(
-        const std::vector<cv::Point2d>& ref_pts,
-        const std::vector<cv::Point2d>& rotated_pts,
-        const double& prior_yaw
+    float get_pts_cost(
+        const std::vector<cv::Point2f>& ref_pts,
+        const std::vector<cv::Point2f>& rotated_pts,
+        const float& prior_yaw
     ) const;
 
     /*!
@@ -102,10 +52,10 @@ private:
         @attention 相机坐标系定义与opencv一致（向右是x，向下是y，向前是z）。
         yaw角定义为装甲板向心方向的法向量在水平面的投影与正前方的夹角，范围-pi/2~pi/2，逆时针为正。
     */
-    std::vector<cv::Point3d> spin_armor_3d(
-        const cv::Point3d& armor_center, 
+    std::vector<cv::Point3f> spin_armor_3d(
+        const cv::Point3f& armor_center, 
         const int armor_label, 
-        const double& armor_yaw
+        const float& armor_yaw
     ) const;
 
     /*!
@@ -113,21 +63,28 @@ private:
         @param object_pts 装甲板的四个角点的3D坐标（基于opencv的相机系）。
         @attention 相机坐标系定义与opencv一致（向右是x，向下是y，向前是z）。
     */
-    std::vector<cv::Point2d> project_3d_to_2d(const std::vector<cv::Point3d>& object_pts) const;
+    std::vector<cv::Point2f> project_3d_to_2d(const std::vector<cv::Point3f>& object_pts) const;
+
+    // 三分法求函数的最小值。
+    std::pair<float, float> trisection_find_min(
+        float left,
+        float right,
+        const std::function<float(float)>& cost_function,
+        const int iterations
+    ) const;
 
     static constexpr int FIND_ANGLE_ITERATIONS = 12; // 三分法迭代次数，理想精度<1
-    static constexpr double SIMPLE_TOP_TRACK_AREA_RATIO = 2.0;
-    static constexpr double DETECTOR_ERROR_PIXEL_BY_SLOPE = 2.0;
-    static constexpr double ARMOR_PITCH = 15.0 / 180.0 * M_PI;
+    static constexpr float SIMPLE_TOP_TRACK_AREA_RATIO = 2.0;
+    static constexpr float DETECTOR_ERROR_PIXEL_BY_SLOPE = 2.0;
+    static constexpr float ARMOR_PITCH = 15.0 / 180.0 * M_PI;
 
     // 单位: 米
-    static constexpr double HEIGHT = 0.055;
-    static constexpr double BIG_WIDTH = 0.2253;
-    static constexpr double SMALL_WIDTH = 0.135;
+    static constexpr float HEIGHT = 0.055;
+    static constexpr float BIG_WIDTH = 0.2253;
+    static constexpr float SMALL_WIDTH = 0.135;
 
-    cv::Mat cam_intrinsic_ =
-        (cv::Mat_<double>(3, 3) << 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
-    cv::Mat cam_distortion_ = (cv::Mat_<double>(1, 5) << 0.0, 0.0, 0.0, 0.0, 0.0);
+    cv::Mat cam_intrinsic_ = (cv::Mat_<float>(3, 3) << 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
+    cv::Mat cam_distortion_ = (cv::Mat_<float>(1, 5) << 0.0, 0.0, 0.0, 0.0, 0.0);
 };
 
 void TrisectionYaw::set_cam_matrix(const cv::Mat intrinsic, const cv::Mat distortion) {
@@ -138,64 +95,65 @@ void TrisectionYaw::set_cam_matrix(const cv::Mat intrinsic, const cv::Mat distor
 void TrisectionYaw::get_rotation(
     const autoaim_interfaces::msg::Detection& detection,
     geometry_msgs::msg::Transform& transform,
-    const double prior_yaw
+    const float prior_yaw
 ) const {
-    const std::vector<cv::Point2d> image_pts {
+    const std::vector<cv::Point2f> image_pts {
         {detection.tl.x, detection.tl.y},
         {detection.bl.x, detection.bl.y},
         {detection.br.x, detection.br.y},
         {detection.tr.x, detection.tr.y}
     };
-    const cv::Point3d armor_center {
-        transform.translation.x,
-        transform.translation.y,
-        transform.translation.z
+    const cv::Point3f armor_center {
+        static_cast<float>(transform.translation.x),
+        static_cast<float>(transform.translation.y),
+        static_cast<float>(transform.translation.z)
     };
-    std::function cost_func = [&](double yaw) -> double {
-        std::vector<cv::Point3d> spinned_armor_pts = spin_armor_3d(armor_center, detection.label, yaw);
-        std::vector<cv::Point2d> spinned_armor_pts_2d = project_3d_to_2d(spinned_armor_pts);
+    std::function cost_func = [&](float yaw) -> float {
+        std::vector<cv::Point3f> spinned_armor_pts =
+            spin_armor_3d(armor_center, detection.label, yaw);
+        std::vector<cv::Point2f> spinned_armor_pts_2d = project_3d_to_2d(spinned_armor_pts);
         return get_pts_cost(image_pts, spinned_armor_pts_2d, prior_yaw);
     };
-    const double armor_yaw =
-        math::trisection_find_min(-M_PI / 2, M_PI / 2, cost_func, FIND_ANGLE_ITERATIONS).first;
+    const float armor_yaw =
+        trisection_find_min(-M_PI / 2, M_PI / 2, cost_func, FIND_ANGLE_ITERATIONS).first;
     tf2::Quaternion quaternion;
     // 相机坐标系定义与opencv一致（向右是x，向下是y，向前是z），装甲板坐标系定义是正常的（向右是x，向前是y，向上是z）。
     // 这里用的pi/2 - pitch是为了把相机坐标系方向转成正常坐标系的方向。
     // setEuler旋转顺序：先绕Y，再绕X，最后绕Z。
-    quaternion.setEuler(-armor_yaw, M_PI / 2 - ARMOR_PITCH, 0); 
+    quaternion.setEuler(-armor_yaw, M_PI / 2 - ARMOR_PITCH, 0);
     transform.rotation.x = quaternion.getX();
     transform.rotation.y = quaternion.getY();
     transform.rotation.z = quaternion.getZ();
     transform.rotation.w = quaternion.getW();
 }
 
-double TrisectionYaw::get_pts_cost(
-    const std::vector<cv::Point2d>& ref_pts,
-    const std::vector<cv::Point2d>& rotated_pts,
-    const double& prior_yaw
+float TrisectionYaw::get_pts_cost(
+    const std::vector<cv::Point2f>& ref_pts,
+    const std::vector<cv::Point2f>& rotated_pts,
+    const float& prior_yaw
 ) const {
     std::size_t size = ref_pts.size();
-    std::vector<Eigen::Vector2d> refs;
-    std::vector<Eigen::Vector2d> pts;
+    std::vector<Eigen::Vector2f> refs;
+    std::vector<Eigen::Vector2f> pts;
     for (int i = 0; i < size; i++) {
         refs.emplace_back(ref_pts[i].x, ref_pts[i].y);
         pts.emplace_back(rotated_pts[i].x, rotated_pts[i].y);
     }
-    double cost = 0.0;
+    float cost = 0.0;
     for (int i = 0; i < size; i++) {
         int p = (i + 1) % size;
         // i - p 构成线段。过程：先移动起点，再补长度，再旋转
-        Eigen::Vector2d ref_d = refs[p] - refs[i]; // 标准
-        Eigen::Vector2d pt_d = pts[p] - pts[i];
+        Eigen::Vector2f ref_d = refs[p] - refs[i]; // 标准
+        Eigen::Vector2f pt_d = pts[p] - pts[i];
         // 长度差代价 + 起点差代价 / 2（0 度左右应该抛弃）
-        double pixel_dis = // dis 是指方差平面内到原点的距离
+        float pixel_dis = // dis 是指方差平面内到原点的距离
             (0.5 * ((refs[i] - pts[i]).norm() + (refs[p] - pts[p]).norm())
              + std::fabs(ref_d.norm() - pt_d.norm()))
             / ref_d.norm();
-        double angular_dis = ref_d.norm() * math::get_angle(ref_d, pt_d) / ref_d.norm();
+        float angular_dis = ref_d.norm() * math::get_angle(ref_d, pt_d) / ref_d.norm();
         // 平方可能是为了配合 sin 和 cos
         // 弧度差代价（0 度左右占比应该大）
-        double cost_i = math::squre(pixel_dis * std::sin(prior_yaw))
+        float cost_i = math::squre(pixel_dis * std::sin(prior_yaw))
             + math::squre(angular_dis * std::cos(prior_yaw)) * DETECTOR_ERROR_PIXEL_BY_SLOPE;
         // 重投影像素误差越大，越相信斜率
         cost += std::sqrt(cost_i);
@@ -203,20 +161,20 @@ double TrisectionYaw::get_pts_cost(
     return cost;
 }
 
-std::vector<cv::Point3d> TrisectionYaw::spin_armor_3d(
-    const cv::Point3d& armor_center,
+std::vector<cv::Point3f> TrisectionYaw::spin_armor_3d(
+    const cv::Point3f& armor_center,
     const int armor_label,
-    const double& armor_yaw
+    const float& armor_yaw
 ) const {
-    const double WIDTH = (armor_label == 1) ? BIG_WIDTH : SMALL_WIDTH;
-    const cv::Point3d width_vec = 
-        cv::Point3d(cos(armor_yaw), 0, sin(armor_yaw)) * (WIDTH / 2);
-    const cv::Point3d height_vec = cv::Point3d(
-        sin(ARMOR_PITCH) * sin(armor_yaw),
-        cos(ARMOR_PITCH),
-        -sin(ARMOR_PITCH) * cos(armor_yaw)
-    ) * (HEIGHT / 2);
-    const std::vector<cv::Point3d> corners {
+    const float WIDTH = (armor_label == 1) ? BIG_WIDTH : SMALL_WIDTH;
+    const cv::Point3f width_vec = cv::Point3f(cos(armor_yaw), 0, sin(armor_yaw)) * (WIDTH / 2);
+    const cv::Point3f height_vec = cv::Point3f(
+                                       sin(ARMOR_PITCH) * sin(armor_yaw),
+                                       cos(ARMOR_PITCH),
+                                       -sin(ARMOR_PITCH) * cos(armor_yaw)
+                                   )
+        * (HEIGHT / 2);
+    const std::vector<cv::Point3f> corners {
         armor_center - width_vec - height_vec,
         armor_center - width_vec + height_vec,
         armor_center + width_vec + height_vec,
@@ -225,9 +183,9 @@ std::vector<cv::Point3d> TrisectionYaw::spin_armor_3d(
     return corners;
 }
 
-std::vector<cv::Point2d> 
-TrisectionYaw::project_3d_to_2d(const std::vector<cv::Point3d>& object_pts) const {
-    std::vector<cv::Point2d> image_pts;
+std::vector<cv::Point2f> TrisectionYaw::project_3d_to_2d(const std::vector<cv::Point3f>& object_pts
+) const {
+    std::vector<cv::Point2f> image_pts;
     // 相机坐标系到平面的投影中，rvec和tvec都是0。
     cv::projectPoints(
         object_pts,
@@ -238,4 +196,35 @@ TrisectionYaw::project_3d_to_2d(const std::vector<cv::Point3d>& object_pts) cons
         image_pts
     );
     return image_pts;
+}
+
+std::pair<float, float> TrisectionYaw::trisection_find_min(
+    float left,
+    float right,
+    const std::function<float(float)>& cost_function,
+    const int iterations
+) const {
+    float phi = (std::sqrt(5.0) - 1.0) / 2.0;
+    float ml_cost = 0.0, mr_cost = 0.0;
+    int reserved = -1;
+    for (int i = 0; i < iterations; i++) {
+        float ml = left + (right - left) * (1. - phi);
+        float mr = left + (right - left) * phi;
+        if (reserved != 0) {
+            ml_cost = cost_function(ml);
+        }
+        if (reserved != 1) {
+            mr_cost = cost_function(mr);
+        }
+        if (ml_cost < mr_cost) {
+            right = mr;
+            mr_cost = ml_cost;
+            reserved = 1;
+        } else {
+            left = ml;
+            ml_cost = mr_cost;
+            reserved = 0;
+        }
+    }
+    return std::make_pair((left + right) / 2.0, right - left);
 }

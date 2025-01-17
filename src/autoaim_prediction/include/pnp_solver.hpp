@@ -74,13 +74,13 @@ public:
     static constexpr float BIG_WIDTH = 0.2253;
     static constexpr float SMALL_WIDTH = 0.135;
     // 装甲板坐标系向右是x，向前是y，向上是z。
-    const std::vector<cv::Point3d> SMALL_POINTS {
+    const std::vector<cv::Point3f> SMALL_POINTS {
         {-SMALL_WIDTH / 2, 0, HEIGHT / 2},
         {-SMALL_WIDTH / 2, 0, -HEIGHT / 2},
         {SMALL_WIDTH / 2, 0, -HEIGHT / 2},
         {SMALL_WIDTH / 2, 0, HEIGHT / 2}
     };
-    const std::vector<cv::Point3d> BIG_POINTS {
+    const std::vector<cv::Point3f> BIG_POINTS {
         {-BIG_WIDTH / 2, 0, HEIGHT / 2},
         {-BIG_WIDTH / 2, 0, -HEIGHT / 2},
         {BIG_WIDTH / 2, 0, -HEIGHT / 2},

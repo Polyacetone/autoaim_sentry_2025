@@ -12,15 +12,16 @@
 
 #include <pnp_solver.hpp>
 #include <trisection_yaw.hpp>
-#include <kf_tracker.hpp>
-#include <ekf_tracker.hpp>
+#include <tracker.hpp>
 #include <trajectory.hpp>
 
+using autoaim_interfaces::msg::Detection;
 using autoaim_interfaces::msg::DetectionArray;
 
 double to_sec(builtin_interfaces::msg::Time t) {
     return t.sec + t.nanosec * 1e-9;
 }
+
 std::string get_tf_armor_name(int color, int label, int index) {
     std::string name;
     char color_map[3] = {'G', 'B', 'R'}; // gray, blue, red
@@ -43,6 +44,7 @@ private:
     void camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg);
     geometry_msgs::msg::Transform
     get_lastest_transform(const std::string& target, const std::string& source) const;
+    void select_armors(const std::vector<Detection> src, std::vector<Detection>& dst) const;
 
     bool enable_debug_;
     bool debug_mode_;
@@ -72,8 +74,7 @@ private:
 
     std::shared_ptr<PnPSolver> pnp_solver_;
     std::shared_ptr<TrisectionYaw> trisection_yaw_;
-    std::shared_ptr<kf_tracker::Tracker> kf_tracker_;
-    std::shared_ptr<ekf_tracker::StandardEKFTracker> ekf_tracker_;
+    std::shared_ptr<Tracker> tracker_;
 };
 
 PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
@@ -85,10 +86,9 @@ PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
 
     pnp_solver_ = std::make_shared<PnPSolver>();
     trisection_yaw_ = std::make_shared<TrisectionYaw>();
-    kf_tracker_ = std::make_shared<kf_tracker::Tracker>();
-    std::string ekf_params_path = ament_index_cpp::get_package_share_directory("autoaim_prediction")
-        + "/config/ekf_params.yaml";
-    ekf_tracker_ = std::make_shared<ekf_tracker::StandardEKFTracker>(ekf_params_path);
+    std::string kf_params_path = ament_index_cpp::get_package_share_directory("autoaim_prediction")
+        + "/config/kf_params.yaml";
+    tracker_ = std::make_shared<Tracker>(kf_params_path);
 
     get_parameters();
 
@@ -158,33 +158,27 @@ void PredictionNode::get_parameters() {
 
 void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) const {
     if (enable_debug_ && debug_mode_ == false) {
-        int armor_count = 0; // 当前画面中存在的目标装甲板数目
-        for (const auto& detection: msg->detections) {
-            if ((debug_target_color_ == 0 || detection.color == debug_target_color_)
-                && detection.label == debug_target_armor_)
-            {
-                armor_count++;
-                // 只是因为tf中两个装甲板不应重名，所以按出现的次序编号。这个编号对后续处理无影响。
-                const std::string armor_name =
-                    get_tf_armor_name(detection.color, detection.label, armor_count);
-                geometry_msgs::msg::TransformStamped armor_to_cam;
-                armor_to_cam.header.stamp = this->now();
-                armor_to_cam.header.frame_id = "autoaim_camera";
-                armor_to_cam.child_frame_id = armor_name;
-                pnp_solver_->solve_pnp(detection, armor_to_cam.transform);
-                trisection_yaw_->get_rotation(detection, armor_to_cam.transform);
-                tf_broadcaster_->sendTransform(armor_to_cam);
+        std::vector<Detection> target_armors;
+        select_armors(msg->detections, target_armors);
+        const int len = target_armors.size();
+        for (int i = 0; i < len; i++) {
+            const Detection& armor = target_armors[i];
+            const std::string armor_name = get_tf_armor_name(armor.color, armor.label, i);
+            geometry_msgs::msg::TransformStamped armor_to_cam;
+            armor_to_cam.header.stamp = this->now();
+            armor_to_cam.header.frame_id = "autoaim_camera";
+            armor_to_cam.child_frame_id = armor_name;
 
-                auto armor_to_spindle = get_lastest_transform("spindle", armor_name);
-                const int armor_area =
-                    (detection.br.x - detection.tl.x) * (detection.br.y - detection.tl.y);
-                ekf_tracker_->push(armor_to_spindle, armor_area);
-            }
+            pnp_solver_->solve_pnp(armor, armor_to_cam.transform);
+            trisection_yaw_->get_rotation(armor, armor_to_cam.transform);
+            tf_broadcaster_->sendTransform(armor_to_cam);
+            
+            auto armor_to_spindle = get_lastest_transform("spindle", armor_name);
+            tracker_->push(armor_to_spindle);
         }
-        ekf_tracker_->update();
-        if (ekf_tracker_->tracker_status == ekf_tracker::TRACKER_STATUS::TRACKING) {
-            const cv::Point3f predicted =
-                ekf_tracker_->get_prediction(debug_bullet_speed_, t_delay_);
+        tracker_->update();
+        if (tracker_->tracker_status == TRACKER_STATUS::TRACKING) {
+            const cv::Point3f predicted = tracker_->get_prediction(debug_bullet_speed_, t_delay_);
             geometry_msgs::msg::TransformStamped predicted_to_cam;
             predicted_to_cam.header.stamp = this->now();
             predicted_to_cam.header.frame_id = "spindle";
@@ -202,7 +196,13 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
                 predicted_to_fric.translation.z,
                 debug_bullet_speed_
             );
-            RCLCPP_INFO(this->get_logger(), "Pitch: %f  Yaw: %f", predicted_pitch, predicted_yaw);
+
+            RCLCPP_INFO(
+                this->get_logger(),
+                "Pitch: %4.1f  Yaw: %4.1f (degree)",
+                math::r2d(predicted_pitch),
+                math::r2d(predicted_yaw)
+            );
         }
     }
 }
@@ -219,6 +219,45 @@ void PredictionNode::camera_info_callback(const sensor_msgs::msg::CameraInfo::Sh
     // 相机内参和畸变在运行中不会改变，所以设置后即可取消camera_info订阅
     camera_info_sub_.reset();
     camera_info_sub_ = nullptr;
+}
+
+void PredictionNode::select_armors(const std::vector<Detection> src, std::vector<Detection>& dst)
+    const {
+    std::vector<Detection> filtered;
+    // 筛选出目标颜色和标签的装甲板
+    for (const auto& armor: src) {
+        if (enable_debug_) {
+            if ((debug_target_color_ == 0 || armor.color == debug_target_color_)
+                && armor.label == debug_target_armor_)
+            {
+                filtered.emplace_back(armor);
+            }
+        } else {
+            // TODO
+        }
+    }
+    if (filtered.size() >= 2) {
+        // 先按照击打面积排序
+        std::sort(filtered.begin(), filtered.end(), [](const Detection& a, const Detection& b) {
+            return (a.br.x - a.tl.x) * (a.br.y - a.tl.y) > (b.br.x - b.tl.x) * (b.br.y - b.tl.y);
+        });
+        dst.emplace_back(filtered[0]);
+        // 接下来选择击打面积次之，且和原来那个位置有较大差异的装甲板。
+        // 虽然理论上detection中的nms已经能去除同一个装甲板的多个识别结果，但有时候还是会出现。
+        const int len = filtered.size();
+        const int center_of_first =
+            (filtered[0].bl.x + filtered[0].br.x + filtered[0].tr.x + filtered[0].tl.x) / 4;
+        for (int i = 1; i < len; i++) {
+            const int center_of_i =
+                (filtered[i].bl.x + filtered[i].br.x + filtered[i].tr.x + filtered[i].tl.x) / 4;
+            if (abs(center_of_first - center_of_i) >= 50) {
+                dst.push_back(filtered[i]);
+                break;
+            }
+        }
+    } else if (filtered.size() == 1) {
+        dst.push_back(filtered[0]);
+    }
 }
 
 geometry_msgs::msg::Transform

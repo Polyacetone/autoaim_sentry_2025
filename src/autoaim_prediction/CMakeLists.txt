@@ -7,6 +7,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
+include_directories(/usr/include/eigen3)
 
 ament_auto_add_library(${PROJECT_NAME} SHARED src/prediction_node.cpp)
 

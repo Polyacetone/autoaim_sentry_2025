@@ -1,0 +1,249 @@
+#pragma once
+
+#include <kalman_filters.hpp>
+#include <math_utils.hpp>
+
+enum class TRACKER_STATUS { CONVERGING, TRACKING, TEMP_LOST, LOST };
+
+struct Armor {
+    cv::Point3f center;
+    float angle;
+};
+
+class Tracker {
+public:
+    Tracker(const std::string& params_path);
+    void push(const geometry_msgs::msg::Transform& transform);
+    void update();
+    cv::Point3f get_prediction(const float bullet_speed, const float time_delay);
+
+    TRACKER_STATUS tracker_status = TRACKER_STATUS::LOST;
+
+private:
+    float INITIAL_RADIUS = 0.26;
+    float INITIAL_HEIGHT = -0.2;
+    float MIN_RADIUS = 0.2, MAX_RADIUS = 0.35;
+    float SWITCH_ARMOR_ANGLE = math::d2r(50);
+    float CLOSE_RADIUS_FILTER_RATIO = 0.7;
+    float FAR_RADIUS_FILTER_RATIO = 0.8;
+    float CLOSE_HEIGHT_FILTER_RATIO = 0.6;
+    float FAR_HEIGHT_FILTER_RATIO = 0.7;
+    float ANTITOP_PALSTANCE_THRESHOLD = math::d2r(50);
+    int MAX_LOST_FRAMES = 5;
+    int CONVERGE_FRAMES = 5;
+
+    std::shared_ptr<KFXYZ> kf_xyz_;
+    std::shared_ptr<KFYaw> kf_yaw_;
+    std::shared_ptr<UKFXY> ukf_;
+    unsigned tracking_frames_ = 0;
+    unsigned lost_frames_ = 0;
+    unsigned observing_armor_id_ = 0;
+    float radius_[2];
+    float height_[2];
+    float yaw_;
+    std::vector<Armor> armors_;
+
+    void load_params(const std::string& params_path);
+    void update_radius();
+    void update_height();
+    void debug_print_state();
+};
+
+Tracker::Tracker(const std::string& params_path) {
+    load_params(params_path);
+    kf_xyz_ = std::make_shared<KFXYZ>(params_path);
+    kf_yaw_ = std::make_shared<KFYaw>(params_path);
+    ukf_ = std::make_shared<UKFXY>(params_path);
+}
+
+void Tracker::push(const geometry_msgs::msg::Transform& transform) {
+    Armor armor;
+    armor.center =
+        cv::Point3f(transform.translation.x, transform.translation.y, transform.translation.z);
+    tf2::Quaternion quaternion(
+        transform.rotation.x,
+        transform.rotation.y,
+        transform.rotation.z,
+        transform.rotation.w
+    );
+    tf2::Matrix3x3 rotation_mat(quaternion);
+    tf2::Vector3 y_vec = rotation_mat.getColumn(1);
+    armor.angle = math::rad_period_correction(-atan(y_vec.getX() / y_vec.getY()));
+    armors_.emplace_back(armor);
+}
+
+void Tracker::update() {
+    using TS = TRACKER_STATUS;
+    static std::chrono::steady_clock::time_point prev;
+    auto now = std::chrono::steady_clock::now();
+    float time_elapsed = (now - prev).count() / 1e9;
+
+    if (armors_.empty() || armors_.size() > 2) {
+        tracking_frames_ = 0;
+        lost_frames_++;
+        if (tracker_status != TS::LOST) { // 短暂失踪，只预测不更新
+            kf_xyz_->predict(time_elapsed);
+            kf_yaw_->predict(time_elapsed);
+            ukf_->predict(time_elapsed);
+            yaw_ = kf_yaw_->yaw;
+            if (lost_frames_ >= MAX_LOST_FRAMES) {
+                tracker_status = TS::LOST;
+            } else {
+                tracker_status = TS::TEMP_LOST;
+            }
+        }
+    } else {
+        lost_frames_ = 0;
+        tracking_frames_++;
+        static float prev_angle;
+        if (tracker_status == TS::LOST) { // 初始化
+            kf_xyz_->initialize(armors_[0].center);
+            kf_yaw_->initialize(armors_[0].angle);
+            const cv::Point2f car_center(
+                armors_[0].center.x - INITIAL_RADIUS * sin(armors_[0].angle),
+                armors_[0].center.y + INITIAL_RADIUS * cos(armors_[0].angle)
+            );
+            ukf_->initialize(car_center);
+            observing_armor_id_ = 0;
+            radius_[0] = radius_[1] = INITIAL_RADIUS;
+            height_[0] = height_[1] = INITIAL_HEIGHT;
+            yaw_ = armors_[0].angle;
+        } else { // 正常预测并更新
+            kf_xyz_->predict(time_elapsed);
+            kf_yaw_->predict(time_elapsed);
+            ukf_->predict(time_elapsed);
+
+            const float delta_angle = armors_[0].angle - prev_angle;
+            yaw_ += delta_angle;
+            if (delta_angle < -SWITCH_ARMOR_ANGLE) { // 逆时针转（角速度大于0）时切换装甲板
+                observing_armor_id_++;
+                observing_armor_id_ %= 4;
+                yaw_ += M_PI / 2;
+                kf_xyz_->force_change_position(armors_[0].center);
+            } else if (delta_angle > SWITCH_ARMOR_ANGLE) { // 顺时针转（角速度小于0）时切换装甲板
+                observing_armor_id_ += 3;
+                observing_armor_id_ %= 4;
+                yaw_ -= M_PI / 2;
+                kf_xyz_->force_change_position(armors_[0].center);
+            } else { // 没有切换装甲板
+                kf_xyz_->update(armors_[0].center);
+            }
+            kf_yaw_->update(yaw_);
+            update_radius();
+            update_height();
+            const cv::Point2f car_center(
+                armors_[0].center.x - radius_[observing_armor_id_ % 2] * sin(armors_[0].angle),
+                armors_[0].center.y + radius_[observing_armor_id_ % 2] * cos(armors_[0].angle)
+            );
+            ukf_->update(car_center);
+        }
+        if (tracking_frames_ >= CONVERGE_FRAMES) {
+            tracker_status = TS::TRACKING;
+        } else {
+            tracker_status = TS::CONVERGING;
+        }
+        prev_angle = armors_[0].angle;
+    }
+
+    armors_.clear();
+    prev = now;
+}
+
+cv::Point3f Tracker::get_prediction(const float bullet_speed, const float time_delay) {
+    debug_print_state();
+    if (abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD) {
+        const float hit_time = time_delay
+            + math::get_distance(kf_xyz_->position + time_delay * kf_xyz_->velocity) / bullet_speed;
+        return kf_xyz_->position + hit_time * kf_xyz_->velocity;
+    } else {
+        const cv::Point2f pred_pos = ukf_->position + ukf_->velocity * time_delay;
+        const float pred_yaw = kf_yaw_->yaw + kf_yaw_->palstance * time_delay;
+        float target_angle = M_PI / 2;
+        int target_armor_index = 0;
+        for (int i = 0; i < 4; i++) {
+            const float pred_angle = math::rad_period_correction(pred_yaw + i * M_PI / 2);
+            if (abs(pred_angle) < abs(target_angle)) {
+                target_angle = pred_angle;
+                target_armor_index = (observing_armor_id_ + i) % 2;
+            }
+        }
+        return cv::Point3f(
+            pred_pos.x - sin(target_angle) * radius_[target_armor_index],
+            pred_pos.y + cos(target_angle) * radius_[target_armor_index],
+            height_[target_armor_index]
+        );
+    }
+}
+
+void Tracker::update_radius() {
+    if (armors_.size() == 2) {
+        const int index = observing_armor_id_ % 2;
+        const float delta_x = armors_[0].center.x - armors_[1].center.x;
+        const float delta_y = armors_[0].center.y - armors_[1].center.y;
+        const float theta = armors_[0].angle;
+        const float r_first = abs(delta_x * sin(theta) - delta_y * cos(theta));
+        const float r_next = abs(delta_x * cos(theta) + delta_y * sin(theta));
+        if (MIN_RADIUS <= r_first && r_first <= MAX_RADIUS) {
+            radius_[index] = CLOSE_RADIUS_FILTER_RATIO * radius_[index]
+                + (1 - CLOSE_RADIUS_FILTER_RATIO) * r_first;
+        }
+        if (MIN_RADIUS <= r_next && r_next <= MAX_RADIUS) {
+            radius_[1 - index] = FAR_RADIUS_FILTER_RATIO * radius_[1 - index]
+                + (1 - FAR_RADIUS_FILTER_RATIO) * r_next;
+        }
+    }
+}
+
+void Tracker::update_height() {
+    const int index = observing_armor_id_ % 2;
+    height_[index] = CLOSE_HEIGHT_FILTER_RATIO * height_[index]
+        + (1 - CLOSE_HEIGHT_FILTER_RATIO) * armors_[0].center.z;
+    if (armors_.size() == 2) {
+        height_[1 - index] = FAR_HEIGHT_FILTER_RATIO * height_[1 - index]
+            + (1 - FAR_HEIGHT_FILTER_RATIO) * armors_[1].center.z;
+    }
+}
+
+void Tracker::load_params(const std::string& params_path) {
+    cv::FileStorage fs(params_path, cv::FileStorage::READ);
+    fs["Tracker"]["initial_radius"] >> INITIAL_RADIUS;
+    fs["Tracker"]["initial_height"] >> INITIAL_HEIGHT;
+    fs["Tracker"]["min_radius"] >> MIN_RADIUS;
+    fs["Tracker"]["max_radius"] >> MAX_RADIUS;
+    fs["Tracker"]["switch_armor_angle"] >> SWITCH_ARMOR_ANGLE;
+    fs["Tracker"]["close_radius_filter_ratio"] >> CLOSE_RADIUS_FILTER_RATIO;
+    fs["Tracker"]["far_radius_filter_ratio"] >> FAR_RADIUS_FILTER_RATIO;
+    fs["Tracker"]["close_height_filter_ratio"] >> CLOSE_HEIGHT_FILTER_RATIO;
+    fs["Tracker"]["far_height_filter_ratio"] >> FAR_HEIGHT_FILTER_RATIO;
+    fs["Tracker"]["antitop_palstance_threshold"] >> ANTITOP_PALSTANCE_THRESHOLD;
+    fs["Tracker"]["max_lost_frames"] >> MAX_LOST_FRAMES;
+    fs["Tracker"]["converge_frames"] >> CONVERGE_FRAMES;
+    fs.release();
+}
+
+void Tracker::debug_print_state() {
+    std::printf("----------\n");
+    std::printf(
+        "kf xyz: [%3.0f, %3.0f, %3.0f] += [%3.0f, %3.0f, %3.0f] (cm)\n",
+        kf_xyz_->position.x * 100,
+        kf_xyz_->position.y * 100,
+        kf_xyz_->position.z * 100,
+        kf_xyz_->velocity.x * 100,
+        kf_xyz_->velocity.y * 100,
+        kf_xyz_->velocity.z * 100
+    );
+    std::printf(
+        "kf yaw: %5.0f += %3.0f (degree)\n",
+        math::r2d(kf_yaw_->yaw),
+        math::r2d(kf_yaw_->palstance)
+    );
+    std::printf(
+        "ukf center: [%3.0f, %3.0f] += [%3.0f, %3.0f] (cm)\n",
+        ukf_->position.x * 100,
+        ukf_->position.y * 100,
+        ukf_->velocity.x * 100,
+        ukf_->velocity.y * 100
+    );
+    std::printf("radius: %3.0f, %3.0f (cm)\n", radius_[0] * 100, radius_[1] * 100);
+    std::printf("height: %3.0f, %3.0f (cm)\n", height_[0] * 100, height_[1] * 100);
+}
