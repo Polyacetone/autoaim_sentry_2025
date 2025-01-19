@@ -175,7 +175,7 @@ void HikCameraNode::open_cam() {
     MV_CC_DEVICE_INFO_LIST devices_list;
     memset(&devices_list, 0, sizeof(MV_CC_DEVICE_INFO_LIST));
     int camera_idx = -1;
-    while (true) {
+    while (rclcpp::ok()) {
         RCLCPP_INFO(this->get_logger(), "looking for camera <%s>", param_.camera_name.c_str());
         catch_error(MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, &devices_list));
         int camera_nums = devices_list.nDeviceNum;
@@ -244,7 +244,7 @@ void HikCameraNode::open_cam() {
         catch_error(MV_CC_SetEnumValue(cam_handle_, "GainAuto", 0));
         catch_error(MV_CC_SetFloatValue(cam_handle_, "Gain", 16));
         catch_error(MV_CC_SetIntValue(cam_handle_, "AutoExposureTimeLowerLimit", 1000));
-        catch_error(MV_CC_SetIntValue(cam_handle_, "AutoExposureTimeUpperLimit", 3000));
+        catch_error(MV_CC_SetIntValue(cam_handle_, "AutoExposureTimeUpperLimit", 2000));
         catch_error(MV_CC_SetEnumValue(cam_handle_, "ExposureAuto", 2));
         catch_error(MV_CC_SetIntValue(cam_handle_, "Brightness", param_.brightness));
         // catch_error(MV_CC_SetEnumValue(cam_handle_, "GainAuto", 2))
@@ -360,8 +360,8 @@ void HikCameraNode::capture_thread() {
     while (rclcpp::ok()) {
         TIME_BEGIN();
         set_mode(decided_mode_);
-        image_msg_.header.stamp = this->now();
         int ret_val = MV_CC_GetImageBuffer(cam_handle_, &out_frame, 1000);
+        image_msg_.header.stamp = this->now();
         if (MV_OK == ret_val) {
             stConvertParam.pDstBuffer = image_msg_.data.data();
             stConvertParam.nDstBufferSize = image_msg_.data.size();

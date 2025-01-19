@@ -11,12 +11,9 @@
     armor_dir_angle: 0.2617993877991494 # 装甲板角度
     
     # 单位: m
-    cam_to_spindle_x: 0.0
-    cam_to_spindle_y: 0.0658
-    cam_to_spindle_z: 0.0639
-    fric_to_spindle_x: 0.0
-    fric_to_spindle_y: 0.06191
-    fric_to_spindle_z: 0.0
+    cam_to_gimbal_x: 0.0
+    cam_to_gimbal_y: 0.09
+    cam_to_gimbal_z: 0.09
     filter_distance: 6.0
     # 单位: degree
     imu_compensate_pitch: 1.3

@@ -1,0 +1,9 @@
+/**:
+  ros__parameters:
+    device_name: /dev/ttyUSB0
+    baud_rate: 115200
+    enable_debug: true
+    debug_mode: 0 # 指定模式，仅在 debug 时生效 NOT_PREDICT = -1, ARMOR_MODE = 0, BUFF_MODE = 1
+
+    comm_send_topic: /serial/comm_send
+    comm_recv_topic: /serial/comm_recv

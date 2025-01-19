@@ -13,6 +13,7 @@ def generate_launch_description():
     camera_info_url = 'package://autoaim_camera/config/camera_info.yaml'
     detection_params_yaml = os.path.join(get_package_share_directory('autoaim_detection'), 'config', 'params.yaml')
     prediction_params_yaml = os.path.join(get_package_share_directory('autoaim_prediction'), 'config', 'params.yaml')
+    serial_params_yaml = os.path.join(get_package_share_directory('autoaim_serial_driver'), 'config', 'params.yaml')
 
     set_env_log_format = SetEnvironmentVariable(
         name='RCUTILS_CONSOLE_OUTPUT_FORMAT',
@@ -47,6 +48,13 @@ def generate_launch_description():
                 plugin='autoaim_prediction::PredictionNode',
                 name='autoaim_prediction',
                 parameters=[prediction_params_yaml],
+                extra_arguments=[{'use_intra_process_comms': use_intra_process_comms}]
+            ),
+            ComposableNode(
+                package='autoaim_serial_driver',
+                plugin='autoaim_serial_driver::SerialDriverNode',
+                name='autoaim_serial_driver',
+                parameters=[serial_params_yaml],
                 extra_arguments=[{'use_intra_process_comms': use_intra_process_comms}]
             )
         ],

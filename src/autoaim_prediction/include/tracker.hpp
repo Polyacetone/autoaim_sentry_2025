@@ -16,6 +16,7 @@ public:
     void push(const geometry_msgs::msg::Transform& transform);
     void update();
     cv::Point3f get_prediction(const float bullet_speed, const float time_delay);
+    void debug_print_state();
 
     TRACKER_STATUS tracker_status = TRACKER_STATUS::LOST;
 
@@ -46,7 +47,6 @@ private:
     void load_params(const std::string& params_path);
     void update_radius();
     void update_height();
-    void debug_print_state();
 };
 
 Tracker::Tracker(const std::string& params_path) {
@@ -150,7 +150,6 @@ void Tracker::update() {
 }
 
 cv::Point3f Tracker::get_prediction(const float bullet_speed, const float time_delay) {
-    debug_print_state();
     if (abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD) {
         const float hit_time = time_delay
             + math::get_distance(kf_xyz_->position + time_delay * kf_xyz_->velocity) / bullet_speed;

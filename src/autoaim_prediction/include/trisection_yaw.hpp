@@ -169,11 +169,10 @@ std::vector<cv::Point3f> TrisectionYaw::spin_armor_3d(
     const float WIDTH = (armor_label == 1) ? BIG_WIDTH : SMALL_WIDTH;
     const cv::Point3f width_vec = cv::Point3f(cos(armor_yaw), 0, sin(armor_yaw)) * (WIDTH / 2);
     const cv::Point3f height_vec = cv::Point3f(
-                                       sin(ARMOR_PITCH) * sin(armor_yaw),
-                                       cos(ARMOR_PITCH),
-                                       -sin(ARMOR_PITCH) * cos(armor_yaw)
-                                   )
-        * (HEIGHT / 2);
+        sin(ARMOR_PITCH) * sin(armor_yaw),
+        cos(ARMOR_PITCH),
+        -sin(ARMOR_PITCH) * cos(armor_yaw)
+    ) * (HEIGHT / 2);
     const std::vector<cv::Point3f> corners {
         armor_center - width_vec - height_vec,
         armor_center - width_vec + height_vec,
@@ -183,8 +182,8 @@ std::vector<cv::Point3f> TrisectionYaw::spin_armor_3d(
     return corners;
 }
 
-std::vector<cv::Point2f> TrisectionYaw::project_3d_to_2d(const std::vector<cv::Point3f>& object_pts
-) const {
+std::vector<cv::Point2f> 
+TrisectionYaw::project_3d_to_2d(const std::vector<cv::Point3f>& object_pts) const {
     std::vector<cv::Point2f> image_pts;
     // 相机坐标系到平面的投影中，rvec和tvec都是0。
     cv::projectPoints(

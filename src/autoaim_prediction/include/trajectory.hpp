@@ -66,11 +66,10 @@ std::tuple<float, float> get_pitch_air_frac(float z, float y, float v) {
     return std::make_tuple(pitch, fly_time);
 }
 
-std::tuple<float, float> get_pitch_yaw(float x, float y, float z, float speed) {
-    float pitch, yaw, fly_time;
+float calc_pitch(float x, float y, float z, float speed) {
+    float pitch, fly_time;
     std::tie(pitch, fly_time) = get_pitch_air_frac(y, z, speed);
-    yaw = -math::rad_period_correction(atan(x / y));
-    return std::make_tuple(pitch, yaw);
+    return pitch;
 }
 
 } // namespace trajectory

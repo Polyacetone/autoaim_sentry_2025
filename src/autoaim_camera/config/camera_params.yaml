@@ -1,6 +1,6 @@
 /**:
   ros__parameters:
-    camera_name: "autoaim" # 相机的名称，可以在MVS里面设定
+    camera_name: "auto" # 相机的名称，可以在MVS里面设定
     auto_exposure: true # 是否自动曝光
     brightness: 15 # 自动曝光的亮度
     exposure: 2000 # 手动设定的曝光时间（打符用？）

@@ -5,9 +5,9 @@
 
 Tracker:
   initial_radius: 0.26
-  initial_height: -0.2
+  initial_height: -0.1
   min_radius: 0.2 # 用于更新惯性滤波的半径最小值
-  max_radius: 0.35 # 用于更新惯性滤波的半径最大值
+  max_radius: 0.6 # 用于更新惯性滤波的半径最大值 ##### 注意：0.6是为了适应贼大的靶车，实际上场应为0.35 #####
   switch_armor_angle: 0.87266 # 角度突变的阈值，用于判断小陀螺跟踪的装甲板是否切换。这里是50度对应的弧度
   close_radius_filter_ratio: 0.9 # 较近的装甲板对应半径的惯性滤波系数
   far_radius_filter_ratio: 0.95 # 较远的装甲板对应半径的惯性滤波系数
