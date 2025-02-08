@@ -1,3 +1,9 @@
+// 维护一个整车状态的跟踪器
+// KFXYZ用于平动，KFYaw+UKFXY用于小陀螺，半径和高度采用惯性滤波
+// 坐标系定义：除相机系（这里应该没涉及）外，其余都是向右x，向前y，向上z
+// yaw角方向定义：逆时针（即从x到y）为正
+// 距离和时间均使用国际单位制（m、s），角度使用弧度制
+
 #pragma once
 
 #include <kalman_filters.hpp>
@@ -6,8 +12,8 @@
 enum class TRACKER_STATUS { CONVERGING, TRACKING, TEMP_LOST, LOST };
 
 struct Armor {
-    cv::Point3f center;
-    float angle;
+    cv::Point3f center; // 装甲板中心坐标
+    float angle; // 装甲板向心方向在xy平面的投影向量与正前方（y轴）的夹角，逆时针为正
 };
 
 class Tracker {
@@ -36,12 +42,13 @@ private:
     std::shared_ptr<KFXYZ> kf_xyz_;
     std::shared_ptr<KFYaw> kf_yaw_;
     std::shared_ptr<UKFXY> ukf_;
-    unsigned tracking_frames_ = 0;
-    unsigned lost_frames_ = 0;
-    unsigned observing_armor_id_ = 0;
-    float radius_[2];
-    float height_[2];
-    float yaw_;
+    unsigned tracking_frames_ = 0; // 连续出现的帧数
+    unsigned lost_frames_ = 0; // 消失的帧数
+    unsigned observing_armor_id_ =
+        0; // 正在观测的装甲板编号。定义第一块看到的装甲板为0，车逆时针转时看到的依次编号1、2、3
+    float radius_[2]; // radius_[0]对应0、2装甲板半径，radius_[1]对应1、3
+    float height_[2]; // height_[0]对应0、2装甲板中心z坐标，height_[1]对应1、3
+    float yaw_; // 0号装甲板累积旋转角度
     std::vector<Armor> armors_;
 
     void load_params(const std::string& params_path);
@@ -76,7 +83,7 @@ void Tracker::update() {
     using TS = TRACKER_STATUS;
     static std::chrono::steady_clock::time_point prev;
     auto now = std::chrono::steady_clock::now();
-    float time_elapsed = (now - prev).count() / 1e9;
+    float time_elapsed = (now - prev).count() / 1e9; // 和上一帧比经过的时间
 
     if (armors_.empty() || armors_.size() > 2) {
         tracking_frames_ = 0;
@@ -150,15 +157,20 @@ void Tracker::update() {
 }
 
 cv::Point3f Tracker::get_prediction(const float bullet_speed, const float time_delay) {
-    if (abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD) {
+    if (abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD) { // 平动，只用KFXYZ预测
+        // 理论上来说要精确求出这里的击打时间需要解一个方程，这里为了简化直接采用一阶近似
         const float hit_time = time_delay
             + math::get_distance(kf_xyz_->position + time_delay * kf_xyz_->velocity) / bullet_speed;
         return kf_xyz_->position + hit_time * kf_xyz_->velocity;
-    } else {
-        const cv::Point2f pred_pos = ukf_->position + ukf_->velocity * time_delay;
-        const float pred_yaw = kf_yaw_->yaw + kf_yaw_->palstance * time_delay;
+    } else { // 转动，用KFYaw和UKFXY预测
+        // 同上，hit_time为一阶近似
+        const float hit_time = time_delay
+            + math::get_distance(ukf_->position + time_delay * ukf_->velocity) / bullet_speed;
+        const cv::Point2f pred_pos = ukf_->position + ukf_->velocity * hit_time;
+        const float pred_yaw = kf_yaw_->yaw + kf_yaw_->palstance * hit_time;
         float target_angle = M_PI / 2;
         int target_armor_index = 0;
+        // 选择在hit_time之后，角度最小（即最面向我们）的那个装甲板
         for (int i = 0; i < 4; i++) {
             const float pred_angle = math::rad_period_correction(pred_yaw + i * M_PI / 2);
             if (abs(pred_angle) < abs(target_angle)) {
@@ -167,8 +179,8 @@ cv::Point3f Tracker::get_prediction(const float bullet_speed, const float time_d
             }
         }
         return cv::Point3f(
-            pred_pos.x - sin(target_angle) * radius_[target_armor_index],
-            pred_pos.y + cos(target_angle) * radius_[target_armor_index],
+            pred_pos.x + sin(target_angle) * radius_[target_armor_index],
+            pred_pos.y - cos(target_angle) * radius_[target_armor_index],
             height_[target_armor_index]
         );
     }

@@ -81,9 +81,6 @@ private:
     ov::CompiledModel compiledModel;
     autoaim_interfaces::msg::DetectionArray armorMsg;
 
-    // 计算FPS
-    std::chrono::time_point<std::chrono::steady_clock> start, end;
-
     void nms(std::vector<cv::Rect>& boxes_, float nmsThreshold_, std::vector<int>& results_);
     void model_initialize();
 };
@@ -217,19 +214,6 @@ void OpenVINOInferEngine::nms(
         }
     }
 }
-
-/*autoaim_interfaces::msg::DetectionArray OpenVINOInferEngine::detect(cv::Mat& img_) {
-    img = img_;
-    start = chrono::steady_clock::now();
-    img_preprocess();
-    infer();
-    img_postprocess();
-    debug_draw_armors();
-    end = chrono::steady_clock::now();
-    chrono::duration<double> elapsed_seconds = end - start;
-    // cout << "average time: " << elapsed_seconds.count() << "s" << endl;
-    return armorMsg;
-}*/
 
 void OpenVINOInferEngine::img_postprocess() {
     // std::cout<<"img_postprocess"<<std::endl;

@@ -7,9 +7,9 @@ autoaim_detection:
     enemy_info_topic: "/decision/cloud_left"
 
     # 模型参数
-    onnx_path: "20230528.onnx"
-    num_color: 4
-    num_tag: 9
+    onnx_name: "20230528.onnx"
+    num_colors: 4
+    num_tags: 9
     confidence_threshold: 0.5
     nms_threshold: 0.4
 

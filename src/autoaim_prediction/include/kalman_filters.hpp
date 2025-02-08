@@ -1,3 +1,6 @@
+// 目前有一个滤装甲板中心的KF（KFXYZ），一个滤整车角度的KF（KFYaw），还有一个滤整车中心的UKF（UKFXY）
+// 装甲板中心的KF用于平动，整车角度KF+整车中心UKF用于小陀螺
+
 #pragma once
 
 #include <Eigen/Core>
@@ -49,6 +52,7 @@ public:
         position.z = predicted.at<float>(2);
     }
 
+    // 强制更新状态量中的位置信息
     void force_change_position(const cv::Point3f& meas) {
         cvkf_xyz_.statePost.at<float>(0) = meas.x;
         cvkf_xyz_.statePost.at<float>(1) = meas.y;

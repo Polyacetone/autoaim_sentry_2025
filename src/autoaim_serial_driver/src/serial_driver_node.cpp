@@ -50,7 +50,7 @@ SerialDriverNode::SerialDriverNode(const rclcpp::NodeOptions& options):
     serial_driver_ = std::make_unique<drivers::serial_driver::SerialDriver>(*owned_ctx_);
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
     get_parameters();
-    constexpr int MAX_ATTEMPTS = 10;
+    constexpr int MAX_ATTEMPTS = 5;
     for (int i = 0; i < MAX_ATTEMPTS && rclcpp::ok(); i++) {
         try {
             if (!serial_driver_->port()->is_open()) {
@@ -69,11 +69,11 @@ SerialDriverNode::SerialDriverNode(const rclcpp::NodeOptions& options):
         RCLCPP_WARN(get_logger(), "Publishing fake imu data.");
         receive_thread_ = std::thread([&]() {
             while (rclcpp::ok()) {
-                geometry_msgs::msg::TransformStamped spindle_to_imu;
-                spindle_to_imu.header.stamp = now();
-                spindle_to_imu.header.frame_id = "world";
-                spindle_to_imu.child_frame_id = "spindle";
-                tf_broadcaster_->sendTransform(spindle_to_imu);
+                geometry_msgs::msg::TransformStamped gimbal_to_imu;
+                gimbal_to_imu.header.stamp = now();
+                gimbal_to_imu.header.frame_id = "world";
+                gimbal_to_imu.child_frame_id = "gimbal";
+                tf_broadcaster_->sendTransform(gimbal_to_imu);
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
         });
@@ -110,7 +110,7 @@ void SerialDriverNode::receive_data_infantry() {
         data.reserve(sizeof(ReceivePacketInfantry));
         data.resize(sizeof(ReceivePacketInfantry) - 1);
         serial_driver_->port()->receive(header);
-        while (header[0] != 0x3f) {
+        while (header[0] != 0x3f && rclcpp::ok()) {
             serial_driver_->port()->receive(header);
         }
         serial_driver_->port()->receive(data);

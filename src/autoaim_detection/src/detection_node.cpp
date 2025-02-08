@@ -7,34 +7,7 @@ namespace autoaim_detection {
 class YoloDetectNode: public rclcpp::Node {
 public:
     YoloDetectNode(const rclcpp::NodeOptions& options): Node("autoaim_detection", options) {
-        // 从launch文件中获取参数
-        this->declare_parameter<std::string>("image_topic", "/camera/image_raw");
-        this->declare_parameter<std::string>("camera_info_topic", "/camera/camera_info");
-        this->declare_parameter<std::string>("detection_topic", "/detection");
-        this->declare_parameter<std::string>("enemy_info_topic", "/enemy_info");
-        this->declare_parameter<std::string>(
-            "image_detected_topic",
-            "/camera/color/image_detection"
-        );
-        this->declare_parameter<std::string>("onnx_path", "111");
-        this->declare_parameter<bool>("enable_debug", false);
-        this->declare_parameter<int>("num_color", 2);
-        this->declare_parameter<int>("num_tag", 6);
-        this->declare_parameter<float>("confidence_threshold", 0.5);
-        this->declare_parameter<float>("nms_threshold", 0.5);
-
-        img_topic_ = this->get_parameter("image_topic").as_string();
-        cam_info_topic_ = this->get_parameter("camera_info_topic").as_string();
-        detection_topic_ = this->get_parameter("detection_topic").as_string();
-        img_detected_topic_ = this->get_parameter("image_detected_topic").as_string();
-        onnx_path_ = ament_index_cpp::get_package_share_directory("autoaim_detection") + "/model/"
-            + this->get_parameter("onnx_path").as_string();
-        num_colors_ = this->get_parameter("num_color").as_int();
-        num_tags_ = this->get_parameter("num_tag").as_int();
-        confidence_threshold_ = this->get_parameter("confidence_threshold").as_double();
-        nms_threshold_ = this->get_parameter("nms_threshold").as_double();
-        enemy_info_topic_ = this->get_parameter("enemy_info_topic").as_string();
-        enable_debug_ = this->get_parameter("enable_debug").as_bool();
+        get_parameters();
 
         if (enable_debug_) {
             RCLCPP_INFO(this->get_logger(), "img_topic: %s", img_topic_.c_str());
@@ -52,11 +25,7 @@ public:
         reset_param_handler_ = this->add_on_set_parameters_callback(parameter_change_cb);
 
         RCLCPP_INFO(this->get_logger(), "初始化YOLO...");
-        Config config = { confidence_threshold_,
-                          nms_threshold_,
-                          num_colors_,
-                          num_tags_,
-                          onnx_path_ };
+        Config config = {confidence_threshold_, nms_threshold_, num_colors_, num_tags_, onnx_path_};
         infer_engine_ = create_infer_engine(config);
         RCLCPP_INFO(this->get_logger(), "初始化YOLO完成");
         // subscribe to image topic
@@ -126,6 +95,23 @@ private:
 
     std::unique_ptr<InferEngine> infer_engine_;
 
+    void get_parameters() {
+        img_topic_ = declare_parameter<std::string>("image_topic", "/camera/image_raw");
+        cam_info_topic_ =
+            declare_parameter<std::string>("camera_info_topic", "/camera/camera_info");
+        detection_topic_ = declare_parameter<std::string>("detection_topic", "/detection");
+        enemy_info_topic_ = declare_parameter<std::string>("enemy_info_topic", "/enemy_info");
+        img_detected_topic_ =
+            declare_parameter<std::string>("image_detected_topic", "/camera/color/image_detection");
+        onnx_path_ = ament_index_cpp::get_package_share_directory("autoaim_detection") + "/model/"
+            + declare_parameter<std::string>("onnx_name", "NULL");
+        enable_debug_ = declare_parameter<bool>("enable_debug", false);
+        num_colors_ = declare_parameter<int>("num_colors", 2);
+        num_tags_ = declare_parameter<int>("num_tags", 6);
+        confidence_threshold_ = declare_parameter<float>("confidence_threshold", 0.5);
+        nms_threshold_ = declare_parameter<float>("nms_threshold", 0.5);
+    }
+
     void enemy_info_callback(const autoaim_interfaces::msg::CommRecv::SharedPtr msg) {
         target_color_ = msg->target_color;
         num_balance_ = msg->balance_target_list;
@@ -152,9 +138,6 @@ private:
         infer_engine_->infer();
         infer_engine_->img_postprocess();
         auto detection_vec = infer_engine_->get_detection_vector();
-        if (!enable_debug_) {
-            filter(detection_vec);
-        }
 
         autoaim_interfaces::msg::DetectionArray detection_array;
         detection_array.detections = detection_vec;

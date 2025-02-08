@@ -10,6 +10,14 @@
 
 class PnPSolver {
 public:
+    /*!
+        @brief 使用IPPE解PnP
+        @param detection 输入的4个角点位置，以及装甲板标签（用于判断装甲板大小）。
+        @param transform 输出的装甲板坐标系到相机坐标系的变换。
+        虽然translation和rotation都写入了，不过鉴于后面有个重投影会再算出rotation，所以写入的rotation目前是没用的。
+        @return 返回1表示找解的时候出现问题（不过这种情况好像不常出现？目前好像没处理）。
+        @attention 相机坐标系定义与opencv一致（向右是x，向下是y，向前是z），装甲板坐标系定义是正常的（向右是x，向前是y，向上是z）。
+    */
     bool solve_pnp(
         const autoaim_interfaces::msg::Detection& detection,
         geometry_msgs::msg::Transform& transform
@@ -61,6 +69,10 @@ public:
         return 0;
     }
 
+    /*!
+        @brief 设置相机的内参矩阵和畸变矩阵
+        @attention 算PnP前一定要先设置这个
+    */
     void set_cam_matrix(const cv::Mat intrinsic, const cv::Mat distortion) {
         cam_intrinsic_ = intrinsic.clone();
         cam_distortion_ = distortion.clone();

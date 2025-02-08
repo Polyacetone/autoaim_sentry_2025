@@ -46,15 +46,19 @@ private:
     void get_parameters();
     void detection_callback(const DetectionArray::SharedPtr msg) const;
     void camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg);
-    [[deprecated]] geometry_msgs::msg::Transform get_lastest_transform(
-        const std::string& target, 
-        const std::string& source
-    ) const;
+
+    // 获取最新且不重复的变换。有些小问题，不建议使用。
+    [[deprecated]] geometry_msgs::msg::Transform
+    get_lastest_transform(const std::string& target, const std::string& source) const;
+
+    // 尝试获取指定时间点对应的变换。若尝试MAX_ATTEMPTS后仍没有找到，返回EMPTY_TRANSFORM
     geometry_msgs::msg::Transform try_get_transform(
         const std::string& target,
         const std::string& source,
         const rclcpp::Time& time_point
     ) const;
+
+    // 选择目标颜色和标签的装甲板，并按照一定规则进行排序
     void select_armors(const std::vector<Detection> src, std::vector<Detection>& dst) const;
 
     bool enable_debug_;
@@ -78,8 +82,8 @@ private:
 
     std::shared_ptr<tf2_ros::StaticTransformBroadcaster> tf_static_broadcaster_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
-    std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+    std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
 
     std::shared_ptr<rclcpp::Subscription<DetectionArray>> detection_sub_;
     std::shared_ptr<rclcpp::Subscription<sensor_msgs::msg::CameraInfo>> camera_info_sub_;
@@ -166,11 +170,12 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             armor_to_cam.header.stamp = msg->header.stamp;
             armor_to_cam.header.frame_id = "autoaim_camera";
             armor_to_cam.child_frame_id = armor_name;
-
+            // 计算装甲板相对于相机坐标系的位姿
             pnp_solver_->solve_pnp(armor, armor_to_cam.transform);
             trisection_yaw_->get_rotation(armor, armor_to_cam.transform);
             tf_broadcaster_->sendTransform(armor_to_cam);
-
+            // 把装甲板的位姿转换到世界坐标系（原点为云台和小yaw转动的中心，方向为imu初始化时的方向）下进行滤波
+            // 尽可能降低自己车的转动对跟踪器的影响。不过由于目前似乎没有有效的精准定位手段，还不能消除平动影响
             auto armor_to_world = try_get_transform("world", armor_name, msg->header.stamp);
             if (armor_to_world != EMPTY_TRANSFORM) {
                 tracker_->push(armor_to_world);
@@ -190,8 +195,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             predicted_to_world.transform.translation.z = predicted.z;
             tf_broadcaster_->sendTransform(predicted_to_world);
 
-            // auto predicted_to_fric_wheel = 
-            //     try_get_transform("fric_wheel", "predicted", msg->header.stamp);
+            // 目前弹道计算直接在世界坐标系下进行。虽然和摩擦轮有一定差距，不过感觉影响不大？
             float predicted_pitch, predicted_yaw;
             predicted_pitch = trajectory::calc_pitch(
                 predicted_to_world.transform.translation.x,
@@ -201,9 +205,9 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             );
             predicted_yaw = math::rad_period_correction(
                 atan2(
-                    predicted_to_world.transform.translation.y, 
+                    predicted_to_world.transform.translation.y,
                     predicted_to_world.transform.translation.x
-                ) 
+                )
                 - M_PI / 2
             );
 
@@ -215,12 +219,12 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
                 math::r2d(predicted_yaw)
             );
 
-            autoaim_interfaces::msg::CommSend comm_send;
+            /*autoaim_interfaces::msg::CommSend comm_send;
             comm_send.header.stamp = now();
             comm_send.found = true;
             comm_send.pitch = math::r2d(predicted_pitch);
             comm_send.yaw = math::r2d(predicted_yaw);
-            comm_send_->publish(comm_send);
+            comm_send_->publish(comm_send);*/
         }
     }
 }
@@ -248,7 +252,7 @@ void PredictionNode::select_armors(
     for (const auto& armor: src) {
         if (enable_debug_) {
             if ((debug_target_color_ == 0 || armor.color == debug_target_color_)
-                && armor.label == debug_target_armor_)
+                && (armor.label == debug_target_armor_))
             {
                 filtered.emplace_back(armor);
             }
@@ -256,34 +260,48 @@ void PredictionNode::select_armors(
             // TODO
         }
     }
-    if (filtered.size() >= 2) {
-        // 先按照击打面积排序
-        std::sort(filtered.begin(), filtered.end(), [](const Detection& a, const Detection& b) {
-            return (a.br.x - a.tl.x) * (a.br.y - a.tl.y) > (b.br.x - b.tl.x) * (b.br.y - b.tl.y);
+    if (filtered.empty()) {
+        return;
+    }
+
+    constexpr auto get_center_x = [](const Detection& d) -> int {
+        return (d.bl.x + d.br.x + d.tr.x + d.tl.x) / 4;
+    };
+    constexpr auto get_area = [](const Detection& d) -> int {
+        return (d.br.x - d.tl.x) * (d.br.y - d.tl.y);
+    };
+    static int center_x_prev = 0;
+    // 对目标装甲板进行排序
+    if (filtered.size() == 1) {
+        dst.push_back(filtered[0]);
+    } else {
+        // 根据击打面积和装甲板位置与正在瞄准位置间的差异排序
+        std::sort(filtered.begin(), filtered.end(), [&](const Detection& a, const Detection& b) {
+            if (center_x_prev == 0) {
+                return get_area(a) > get_area(b);
+            } else {
+                return get_area(a) - abs(get_center_x(a) - center_x_prev)
+                    > get_area(b) - abs(get_center_x(b) - center_x_prev);
+            }
         });
         dst.emplace_back(filtered[0]);
         // 接下来选择击打面积次之，且和原来那个位置有较大差异的装甲板。
         // 虽然理论上detection中的nms已经能去除同一个装甲板的多个识别结果，但有时候还是会出现。
         const int len = filtered.size();
-        const int center_of_first =
-            (filtered[0].bl.x + filtered[0].br.x + filtered[0].tr.x + filtered[0].tl.x) / 4;
+        const int center_x_first = get_center_x(filtered[0]);
         for (int i = 1; i < len; i++) {
-            const int center_of_i =
-                (filtered[i].bl.x + filtered[i].br.x + filtered[i].tr.x + filtered[i].tl.x) / 4;
-            if (abs(center_of_first - center_of_i) >= 50) {
+            const int center_x_i = get_center_x(filtered[i]);
+            if (abs(center_x_first - center_x_i) >= 50) {
                 dst.push_back(filtered[i]);
                 break;
             }
         }
-    } else if (filtered.size() == 1) {
-        dst.push_back(filtered[0]);
     }
+    center_x_prev = get_center_x(dst[0]);
 }
 
-[[deprecated]] geometry_msgs::msg::Transform PredictionNode::get_lastest_transform(
-    const std::string& target, 
-    const std::string& source
-) const {
+[[deprecated]] geometry_msgs::msg::Transform
+PredictionNode::get_lastest_transform(const std::string& target, const std::string& source) const {
     // 防止buffer没来得及更新使得找不到frame
     while (!tf_buffer_->canTransform(target, source, tf2::TimePointZero)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -300,7 +318,7 @@ void PredictionNode::select_armors(
 }
 
 geometry_msgs::msg::Transform PredictionNode::try_get_transform(
-    const std::string& target, 
+    const std::string& target,
     const std::string& source,
     const rclcpp::Time& time_point
 ) const {

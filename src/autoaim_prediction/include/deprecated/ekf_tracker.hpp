@@ -1,4 +1,6 @@
 // 从 https://github.com/SnocrashWang/WMJAimer 抄来的
+// 把两个观测装甲板的坐标、速度，两个半径，两个高度，还有整车角度都丢进一个大的EKF
+// 具体看wiki：https://github.com/SnocrashWang/WMJAimer/wiki/WMJAimer-Project-Report
 
 #pragma once
 
