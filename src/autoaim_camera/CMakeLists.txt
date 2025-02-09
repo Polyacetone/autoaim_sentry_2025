@@ -4,14 +4,13 @@ project(autoaim_camera)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-add_definitions(-Wall -Werror)
+add_compile_options("-Ofast")
 
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
 ament_auto_add_library(${PROJECT_NAME} SHARED
-  src/hik_camera_node.cpp
+  src/camera_node.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC hikSDK/include)
@@ -39,7 +38,7 @@ target_link_libraries(${PROJECT_NAME}
 )
 
 rclcpp_components_register_node(${PROJECT_NAME}
-  PLUGIN autoaim_camera::HikCameraNode
+  PLUGIN autoaim_camera::CameraNode
   EXECUTABLE ${PROJECT_NAME}_node
 )
 

@@ -1,15 +1,7 @@
 /**:
   ros__parameters:
-    enable_debug: false # 是否启用debug
+    enable_show_fps: false # 是否显示相机帧率
     camera_name: "auto" # 相机的名称，可以在MVS里面设定
-    auto_exposure: true # 是否自动曝光
-    enable_gamma: true # 是否启用gamma
-    brightness: 15 # 自动曝光的亮度
-    camera_offset_y: 0 # 图像的偏移
-    default_mode: 0 # 0:Armor mode 1:small buff mode 2:big buff mode
-    exposure: 2000 # 手动设定的曝光时间（打符用）
-    gain: 10.0 # 手动设定的增益（打符用）
+
     img_pub_topic: "/camera/color/image_raw" # 发布的topic名字
-    enemy_info_topic: "/decision/cloud_left" 
-    current_time_topic: "/current_time" # 订阅的时间的topic名字
     camera_info_url: "package://autoaim_camera/config/camera_info.yaml" # 相机参数的url

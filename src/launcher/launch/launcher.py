@@ -10,14 +10,13 @@ use_intra_process_comms = True
 
 def generate_launch_description():
     camera_params_yaml = os.path.join(get_package_share_directory('autoaim_camera'), 'config', 'camera_params.yaml')
-    camera_info_url = 'package://autoaim_camera/config/camera_info.yaml'
     detection_params_yaml = os.path.join(get_package_share_directory('autoaim_detection'), 'config', 'params.yaml')
     prediction_params_yaml = os.path.join(get_package_share_directory('autoaim_prediction'), 'config', 'params.yaml')
     serial_params_yaml = os.path.join(get_package_share_directory('autoaim_serial_driver'), 'config', 'params.yaml')
 
     set_env_log_format = SetEnvironmentVariable(
         name='RCUTILS_CONSOLE_OUTPUT_FORMAT',
-        value='[{severity}]: {message}'
+        value='[{severity}] [{name}]: {message}'
     )
     
     container = ComposableNodeContainer(
@@ -28,12 +27,9 @@ def generate_launch_description():
         composable_node_descriptions=[
             ComposableNode(
                 package='autoaim_camera',
-                plugin='autoaim_camera::HikCameraNode',
+                plugin='autoaim_camera::CameraNode',
                 name='autoaim_camera',
-                parameters=[camera_params_yaml, {
-                    'camera_info_url': camera_info_url,
-                    'use_sensor_data_qos': False,
-                }],
+                parameters=[camera_params_yaml],
                 extra_arguments=[{'use_intra_process_comms': use_intra_process_comms}]
             ),
             ComposableNode(

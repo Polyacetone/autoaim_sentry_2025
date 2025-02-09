@@ -4,15 +4,20 @@
 #include <autoaim_interfaces/msg/detection_array.hpp>
 
 namespace autoaim_detection {
+float get_fps() {
+    static auto prev = std::chrono::high_resolution_clock::now();
+    auto now = std::chrono::high_resolution_clock::now();
+    float elapsed_sec = (now - prev).count() / 1e9;
+    prev = now;
+    return 1 / elapsed_sec;
+}
+
 class YoloDetectNode: public rclcpp::Node {
 public:
     YoloDetectNode(const rclcpp::NodeOptions& options): Node("autoaim_detection", options) {
         get_parameters();
 
         if (enable_debug_) {
-            RCLCPP_INFO(this->get_logger(), "img_topic: %s", img_topic_.c_str());
-            RCLCPP_INFO(this->get_logger(), "cam_info_topic: %s", cam_info_topic_.c_str());
-            RCLCPP_INFO(this->get_logger(), "detection_topic: %s", detection_topic_.c_str());
             RCLCPP_INFO(
                 this->get_logger(),
                 "Debug enabled. img_detected_topic: %s",
@@ -130,6 +135,10 @@ private:
     }
 
     void img_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
+        if (enable_debug_) {
+            RCLCPP_INFO(get_logger(), "Detection FPS: %.0f", get_fps());
+        }
+
         const auto cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
         const cv::Mat img = cv_ptr->image;
 
