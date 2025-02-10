@@ -9,7 +9,7 @@ from ament_index_python.packages import get_package_share_directory
 use_intra_process_comms = True
 
 def generate_launch_description():
-    camera_params_yaml = os.path.join(get_package_share_directory('autoaim_camera'), 'config', 'camera_params.yaml')
+    camera_params_yaml = os.path.join(get_package_share_directory('autoaim_camera'), 'config', 'params.yaml')
     detection_params_yaml = os.path.join(get_package_share_directory('autoaim_detection'), 'config', 'params.yaml')
     prediction_params_yaml = os.path.join(get_package_share_directory('autoaim_prediction'), 'config', 'params.yaml')
     serial_params_yaml = os.path.join(get_package_share_directory('autoaim_serial_driver'), 'config', 'params.yaml')

@@ -6,11 +6,11 @@ autoaim_detection:
     image_detected_topic: "/debug/detected_image"
     enemy_info_topic: "/decision/cloud_left"
 
-    # 模型参数
     onnx_name: "20230528.onnx"
     num_colors: 4
     num_tags: 9
     confidence_threshold: 0.5
     nms_threshold: 0.4
 
-    enable_debug: true
+    enable_detected_image: true
+    enable_fps: false

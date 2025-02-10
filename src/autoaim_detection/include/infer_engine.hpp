@@ -7,9 +7,9 @@ class InferEngine {
 public:
     virtual ~InferEngine() = default;
 
-    virtual void img_preprocess() = 0;
+    virtual void preprocess() = 0;
     virtual void infer() = 0;
-    virtual void img_postprocess() = 0;
+    virtual void postprocess() = 0;
 
     virtual void set_input_image(const cv::Mat img) = 0;
     virtual std::vector<autoaim_interfaces::msg::Detection> get_detection_vector() const = 0;

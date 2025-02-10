@@ -4,6 +4,7 @@ project(autoaim_serial_driver)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+add_compile_options("-Ofast")
 
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()

@@ -17,14 +17,6 @@ public:
     YoloDetectNode(const rclcpp::NodeOptions& options): Node("autoaim_detection", options) {
         get_parameters();
 
-        if (enable_debug_) {
-            RCLCPP_INFO(
-                this->get_logger(),
-                "Debug enabled. img_detected_topic: %s",
-                img_detected_topic_.c_str()
-            );
-        }
-
         auto parameter_change_cb =
             std::bind(&YoloDetectNode::parameter_callback, this, std::placeholders::_1);
         reset_param_handler_ = this->add_on_set_parameters_callback(parameter_change_cb);
@@ -83,7 +75,8 @@ private:
     std::string detection_topic_;
     std::string img_detected_topic_;
     std::string onnx_path_;
-    bool enable_debug_;
+    bool enable_detected_image_;
+    bool enable_fps_;
     int num_colors_;
     int num_tags_;
     int num_balance_;
@@ -110,7 +103,8 @@ private:
             declare_parameter<std::string>("image_detected_topic", "/camera/color/image_detection");
         onnx_path_ = ament_index_cpp::get_package_share_directory("autoaim_detection") + "/model/"
             + declare_parameter<std::string>("onnx_name", "NULL");
-        enable_debug_ = declare_parameter<bool>("enable_debug", false);
+        enable_detected_image_ = declare_parameter<bool>("enable_detected_image", false);
+        enable_fps_ = declare_parameter<bool>("enable_fps", false);
         num_colors_ = declare_parameter<int>("num_colors", 2);
         num_tags_ = declare_parameter<int>("num_tags", 6);
         confidence_threshold_ = declare_parameter<float>("confidence_threshold", 0.5);
@@ -135,7 +129,7 @@ private:
     }
 
     void img_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
-        if (enable_debug_) {
+        if (enable_fps_) {
             RCLCPP_INFO(get_logger(), "Detection FPS: %.0f", get_fps());
         }
 
@@ -143,9 +137,9 @@ private:
         const cv::Mat img = cv_ptr->image;
 
         infer_engine_->set_input_image(img);
-        infer_engine_->img_preprocess();
+        infer_engine_->preprocess();
         infer_engine_->infer();
-        infer_engine_->img_postprocess();
+        infer_engine_->postprocess();
         auto detection_vec = infer_engine_->get_detection_vector();
 
         autoaim_interfaces::msg::DetectionArray detection_array;
@@ -153,7 +147,7 @@ private:
         detection_array.header = msg->header;
         detection_pub_->publish(detection_array);
 
-        if (enable_debug_) {
+        if (enable_detected_image_) {
             sensor_msgs::msg::Image::SharedPtr img_detected =
                 cv_bridge::CvImage(msg->header, "bgr8", infer_engine_->debug_draw_armors())
                     .toImageMsg();

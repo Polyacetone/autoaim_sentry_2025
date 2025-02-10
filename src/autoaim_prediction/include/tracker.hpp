@@ -44,8 +44,7 @@ private:
     std::shared_ptr<UKFXY> ukf_;
     unsigned tracking_frames_ = 0; // 连续出现的帧数
     unsigned lost_frames_ = 0; // 消失的帧数
-    unsigned observing_armor_id_ =
-        0; // 正在观测的装甲板编号。定义第一块看到的装甲板为0，车逆时针转时看到的依次编号1、2、3
+    unsigned observing_armor_id_ = 0; // 正在观测的装甲板编号。定义第一块看到的装甲板为0，车逆时针转时看到的依次编号1、2、3
     float radius_[2]; // radius_[0]对应0、2装甲板半径，radius_[1]对应1、3
     float height_[2]; // height_[0]对应0、2装甲板中心z坐标，height_[1]对应1、3
     float yaw_; // 0号装甲板累积旋转角度

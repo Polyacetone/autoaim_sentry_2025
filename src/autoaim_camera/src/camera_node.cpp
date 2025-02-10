@@ -27,8 +27,8 @@ public:
 
 private:
     void get_parameters();
-    bool open_cam();
-    void set_cam_params();
+    void open_cam();
+    void start_grabbing();
     void close_cam();
     void capture_thread();
     bool catch_error(int ret, const char* description);
@@ -44,14 +44,15 @@ private:
 
     std::thread capture_thread_;
 
-    bool enable_show_fps_;
+    bool enable_fps_;
     std::string camera_name_;
+    float exposure_, gain_;
 };
 
 CameraNode::CameraNode(const rclcpp::NodeOptions& options): Node("autoaim_camera", options) {
     get_parameters();
     open_cam();
-    set_cam_params();
+    start_grabbing();
     capture_thread_ = std::thread(&CameraNode::capture_thread, this);
 }
 
@@ -70,7 +71,7 @@ void CameraNode::close_cam() {
 
 bool CameraNode::catch_error(int ret, const char* description) {
     if (ret != MV_OK) {
-        RCLCPP_ERROR(this->get_logger(), "Error when \"%s\": %#x", description, ret);
+        RCLCPP_ERROR(this->get_logger(), "Error in \"%s\": %#x", description, ret);
         return true;
     }
     return false;
@@ -81,7 +82,9 @@ void CameraNode::get_parameters() {
         declare_parameter("camera_info_url", "package://autoaim_camera/config/camera_info.yaml");
     std::string img_pub_topic_ = declare_parameter("img_pub_topic", "/camera/color/image_raw");
     camera_name_ = declare_parameter("camera_name", "auto");
-    enable_show_fps_ = declare_parameter("enable_show_fps", false);
+    enable_fps_ = declare_parameter("enable_fps", false);
+    exposure_ = declare_parameter("exposure", 2000.0);
+    gain_ = declare_parameter("gain", 16.0);
 
     camera_info_manager_ =
         std::make_unique<camera_info_manager::CameraInfoManager>(this, camera_name_);
@@ -100,9 +103,9 @@ void CameraNode::capture_thread() {
     image_msg_.header.frame_id = "camera_optical_frame";
     image_msg_.encoding = "rgb8";
     while (rclcpp::ok()) {
-        int ret_val = MV_CC_GetImageBuffer(cam_handle_, &out_frame, 1000);
+        const int ret_val = MV_CC_GetImageBuffer(cam_handle_, &out_frame, 1000);
         image_msg_.header.stamp = this->now();
-        if (MV_OK == ret_val) {
+        if (ret_val == MV_OK) {
             pixel_convert_param_.pDstBuffer = image_msg_.data.data();
             pixel_convert_param_.nDstBufferSize = image_msg_.data.size();
             pixel_convert_param_.pSrcData = out_frame.pBufAddr;
@@ -125,20 +128,20 @@ void CameraNode::capture_thread() {
             MV_CC_StopGrabbing(cam_handle_);
             MV_CC_StartGrabbing(cam_handle_);
         }
-        if (enable_show_fps_) {
+        if (enable_fps_) {
             RCLCPP_INFO(this->get_logger(), "Camera FPS: %.0f", get_fps());
         }
     }
 }
 
-bool CameraNode::open_cam() {
+void CameraNode::open_cam() {
     MV_CC_DEVICE_INFO_LIST devices_list;
     memset(&devices_list, 0, sizeof(MV_CC_DEVICE_INFO_LIST));
     int camera_idx = -1;
     while (rclcpp::ok()) {
         RCLCPP_INFO(this->get_logger(), "Looking for camera <%s>", camera_name_.c_str());
         catch_error(MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, &devices_list), "enum devices");
-        int camera_nums = devices_list.nDeviceNum;
+        const int camera_nums = devices_list.nDeviceNum;
         for (int i = 0; i < camera_nums; i++) {
             MV_CC_DEVICE_INFO* device_info_ptr = devices_list.pDeviceInfo[i];
             std::string name(reinterpret_cast<char const*>(
@@ -163,19 +166,16 @@ bool CameraNode::open_cam() {
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
     catch_error(MV_CC_CreateHandle(&cam_handle_, devices_list.pDeviceInfo[camera_idx]), "create handle");
-    return catch_error(MV_CC_OpenDevice(cam_handle_), "open device");
+    catch_error(MV_CC_OpenDevice(cam_handle_), "open device");
 }
 
-void CameraNode::set_cam_params() {
+void CameraNode::start_grabbing() {
     // 合并相邻像素，1440*1080 -> 720*540
     catch_error(MV_CC_SetEnumValue(cam_handle_, "BinningHorizontal", 2), "set binning horizontal");
     catch_error(MV_CC_SetEnumValue(cam_handle_, "BinningVertical", 2), "set binning vertical");
 
-    MV_CC_GetImageInfo(cam_handle_, &img_info_);
-    pixel_convert_param_.nWidth = img_info_.nWidthValue;
-    pixel_convert_param_.nHeight = img_info_.nHeightValue;
-    pixel_convert_param_.enDstPixelType = PixelType_Gvsp_RGB8_Packed;
-    MV_CC_SetEnumValue(cam_handle_, "PixelFormat", PixelType_Gvsp_BGR8_Packed);
+    // 设置像素格式
+    catch_error(MV_CC_SetEnumValue(cam_handle_, "PixelFormat", PixelType_Gvsp_BGR8_Packed), "set pixel format");
 
     // 启用自动gamma
     catch_error(MV_CC_SetBoolValue(cam_handle_, "GammaEnable", true), "set gamma enable");
@@ -188,14 +188,20 @@ void CameraNode::set_cam_params() {
     // 手动设置曝光和增益
     catch_error(MV_CC_SetEnumValue(cam_handle_, "ExposureAuto", 0), "set auto exposure");
     catch_error(MV_CC_SetEnumValue(cam_handle_, "GainAuto", 0), "set auto gain");
-    catch_error(MV_CC_SetFloatValue(cam_handle_, "ExposureTime", 2000), "set exposure time");
-    catch_error(MV_CC_SetFloatValue(cam_handle_, "Gain", 16), "set gain");
+    catch_error(MV_CC_SetFloatValue(cam_handle_, "ExposureTime", exposure_), "set exposure time");
+    catch_error(MV_CC_SetFloatValue(cam_handle_, "Gain", gain_), "set gain");
 
     // 设置分辨率（适当裁切，与模型输入大小匹配）
     catch_error(MV_CC_SetIntValue(cam_handle_, "Width", 640), "set width");
     catch_error(MV_CC_SetIntValue(cam_handle_, "Height", 384), "set height");
     catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetX", 40), "set offset x");
     catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetY", 124), "set offset y");
+
+    // 设置BGR转RGB
+    catch_error(MV_CC_GetImageInfo(cam_handle_, &img_info_), "get image info");
+    pixel_convert_param_.nWidth = img_info_.nWidthValue;
+    pixel_convert_param_.nHeight = img_info_.nHeightValue;
+    pixel_convert_param_.enDstPixelType = PixelType_Gvsp_RGB8_Packed;
 
     // 开始取流
     catch_error(MV_CC_StartGrabbing(cam_handle_), "start grabbing");

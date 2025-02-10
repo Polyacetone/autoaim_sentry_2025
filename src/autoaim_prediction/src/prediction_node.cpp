@@ -61,6 +61,7 @@ private:
     // 选择目标颜色和标签的装甲板，并按照一定规则进行排序
     void select_armors(const std::vector<Detection> src, std::vector<Detection>& dst) const;
 
+    bool enable_print_state_;
     bool enable_debug_;
     bool debug_mode_;
     int debug_target_color_;
@@ -123,6 +124,7 @@ PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
 }
 
 void PredictionNode::get_parameters() {
+    enable_print_state_ = declare_parameter("enable_print_state", false);
     enable_debug_ = declare_parameter("enable_debug", false);
     debug_mode_ = declare_parameter("debug_mode", false);
     debug_prediction_time_ = declare_parameter("debug_prediction_time", 0.0);
@@ -211,13 +213,15 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
                 - M_PI / 2
             );
 
-            tracker_->debug_print_state();
-            RCLCPP_INFO(
-                get_logger(),
-                "Pitch: %4.1f  Yaw: %4.1f (degree)",
-                math::r2d(predicted_pitch),
-                math::r2d(predicted_yaw)
-            );
+            if (enable_print_state_) {
+                tracker_->debug_print_state();
+                RCLCPP_INFO(
+                    get_logger(),
+                    "Pitch: %4.1f  Yaw: %4.1f (degree)",
+                    math::r2d(predicted_pitch),
+                    math::r2d(predicted_yaw)
+                );
+            }
 
             /*autoaim_interfaces::msg::CommSend comm_send;
             comm_send.header.stamp = now();
