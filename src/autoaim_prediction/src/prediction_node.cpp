@@ -104,9 +104,9 @@ PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
 
     pnp_solver_ = std::make_shared<PnPSolver>();
     trisection_yaw_ = std::make_shared<TrisectionYaw>();
-    std::string kf_params_path = ament_index_cpp::get_package_share_directory("autoaim_prediction")
-        + "/config/kf_params.yaml";
-    tracker_ = std::make_shared<Tracker>(kf_params_path);
+    std::string tracker_params_path = ament_index_cpp::get_package_share_directory("autoaim_prediction")
+        + "/config/tracker_params.yaml";
+    tracker_ = std::make_shared<Tracker>(tracker_params_path);
 
     get_parameters();
 
@@ -251,23 +251,6 @@ void PredictionNode::select_armors(
     const std::vector<Detection> src, 
     std::vector<Detection>& dst
 ) const {
-    std::vector<Detection> filtered;
-    // 筛选出目标颜色和标签的装甲板
-    for (const auto& armor: src) {
-        if (enable_debug_) {
-            if ((debug_target_color_ == 0 || armor.color == debug_target_color_)
-                && (armor.label == debug_target_armor_))
-            {
-                filtered.emplace_back(armor);
-            }
-        } else {
-            // TODO
-        }
-    }
-    if (filtered.empty()) {
-        return;
-    }
-
     constexpr auto get_center_x = [](const Detection& d) -> int {
         return (d.bl.x + d.br.x + d.tr.x + d.tl.x) / 4;
     };
@@ -275,6 +258,32 @@ void PredictionNode::select_armors(
         return (d.br.x - d.tl.x) * (d.br.y - d.tl.y);
     };
     static int center_x_prev = 0;
+
+    std::vector<Detection> filtered;
+    // 筛选出目标颜色和标签的装甲板
+    for (const auto& armor: src) {
+        if (enable_debug_) {
+            if (armor.label == debug_target_armor_) {
+                if (debug_target_color_ == 0 || debug_target_color_ == armor.color) {
+                    filtered.emplace_back(armor);
+                } else if (armor.color == 0) { // 特殊处理灰色装甲板
+                    if (abs(get_center_x(armor) - center_x_prev) <= 15) {
+                        // 这里只根据灰色装甲板位置与上次瞄的位置差判断是否是被打成灰的
+                        // 理论上需要累计计数判断是被打死了还是暂时灰色
+                        // 不过哨兵决策应该会确保自瞄不会对着死人爽打，所以这块不写了
+                        filtered.emplace_back(armor);
+                    }
+                }
+            }
+        } else {
+            // TODO
+        }
+    }
+    if (filtered.empty()) {
+        center_x_prev = 0;
+        return;
+    }
+
     // 对目标装甲板进行排序
     if (filtered.size() == 1) {
         dst.push_back(filtered[0]);
@@ -295,7 +304,7 @@ void PredictionNode::select_armors(
         const int center_x_first = get_center_x(filtered[0]);
         for (int i = 1; i < len; i++) {
             const int center_x_i = get_center_x(filtered[i]);
-            if (abs(center_x_first - center_x_i) >= 50) {
+            if (abs(center_x_first - center_x_i) >= 15) {
                 dst.push_back(filtered[i]);
                 break;
             }

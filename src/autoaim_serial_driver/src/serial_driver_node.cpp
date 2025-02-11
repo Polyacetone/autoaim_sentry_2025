@@ -69,11 +69,11 @@ SerialDriverNode::SerialDriverNode(const rclcpp::NodeOptions& options):
         RCLCPP_WARN(get_logger(), "Publishing fake imu data.");
         receive_thread_ = std::thread([&]() {
             while (rclcpp::ok()) {
-                geometry_msgs::msg::TransformStamped gimbal_to_imu;
-                gimbal_to_imu.header.stamp = now();
-                gimbal_to_imu.header.frame_id = "world";
-                gimbal_to_imu.child_frame_id = "gimbal";
-                tf_broadcaster_->sendTransform(gimbal_to_imu);
+                geometry_msgs::msg::TransformStamped gimbal_to_world;
+                gimbal_to_world.header.stamp = now();
+                gimbal_to_world.header.frame_id = "world";
+                gimbal_to_world.child_frame_id = "gimbal";
+                tf_broadcaster_->sendTransform(gimbal_to_world);
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
         });
