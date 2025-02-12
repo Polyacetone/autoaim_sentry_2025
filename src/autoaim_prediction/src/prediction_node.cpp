@@ -62,24 +62,18 @@ private:
     void select_armors(const std::vector<Detection> src, std::vector<Detection>& dst) const;
 
     bool enable_print_state_;
+    bool enable_send_to_serial_;
     bool enable_debug_;
     bool debug_mode_;
     int debug_target_color_;
     int debug_target_armor_;
     int debug_buff_mode_;
-    float debug_prediction_time_;
     float debug_bullet_speed_;
-
-    float armor_dir_angle_;
-    float filter_distance_;
-    float imu_compensate_pitch_;
-    float imu_compensate_yaw_;
-    float t_delay_;
+    float control_to_fire_time_;
 
     std::string camera_info_topic_;
     std::string detection_sub_topic_;
     std::string comm_pub_topic_;
-    std::string position_pub_topic_;
 
     std::shared_ptr<tf2_ros::StaticTransformBroadcaster> tf_static_broadcaster_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
@@ -104,7 +98,8 @@ PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
 
     pnp_solver_ = std::make_shared<PnPSolver>();
     trisection_yaw_ = std::make_shared<TrisectionYaw>();
-    std::string tracker_params_path = ament_index_cpp::get_package_share_directory("autoaim_prediction")
+    std::string tracker_params_path =
+        ament_index_cpp::get_package_share_directory("autoaim_prediction")
         + "/config/tracker_params.yaml";
     tracker_ = std::make_shared<Tracker>(tracker_params_path);
 
@@ -125,22 +120,17 @@ PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
 
 void PredictionNode::get_parameters() {
     enable_print_state_ = declare_parameter("enable_print_state", false);
+    enable_send_to_serial_ = declare_parameter("enable_send_to_serial", true);
     enable_debug_ = declare_parameter("enable_debug", false);
     debug_mode_ = declare_parameter("debug_mode", false);
-    debug_prediction_time_ = declare_parameter("debug_prediction_time", 0.0);
     debug_target_color_ = declare_parameter("debug_target_color", 0);
     debug_target_armor_ = declare_parameter("debug_target_armor", 1);
     debug_buff_mode_ = declare_parameter("debug_buff_mode", 1);
     debug_bullet_speed_ = declare_parameter("debug_bullet_speed", 30.0);
-    armor_dir_angle_ = declare_parameter("armor_dir_angle", 0.2618);
-    filter_distance_ = declare_parameter("filter_distance", 6.0);
-    imu_compensate_pitch_ = declare_parameter("imu_compensate_pitch", 1.3);
-    imu_compensate_yaw_ = declare_parameter("imu_compensate_yaw", 0.3);
-    t_delay_ = declare_parameter("t_delay", 0.098);
+    control_to_fire_time_ = declare_parameter("control_to_fire_time", 0.098);
     camera_info_topic_ = declare_parameter("camera_info_topic", "/camera/color/camera_info");
     detection_sub_topic_ = declare_parameter("detection_sub_topic", "/detection");
     comm_pub_topic_ = declare_parameter("comm_pub_topic", "/serial/comm_send");
-    position_pub_topic_ = declare_parameter("position_pub_topic", "/debug/position");
 
     const double cam_to_gimbal_x = declare_parameter("cam_to_gimbal_x", 0.0);
     const double cam_to_gimbal_y = declare_parameter("cam_to_gimbal_y", 0.0658);
@@ -187,48 +177,40 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
         }
         tracker_->update();
         if (tracker_->tracker_status == TRACKER_STATUS::TRACKING) {
-            const cv::Point3f predicted = tracker_->get_prediction(debug_bullet_speed_, t_delay_);
-            geometry_msgs::msg::TransformStamped predicted_to_world;
-            predicted_to_world.header.stamp = msg->header.stamp;
-            predicted_to_world.header.frame_id = "world";
-            predicted_to_world.child_frame_id = "predicted";
-            predicted_to_world.transform.translation.x = predicted.x;
-            predicted_to_world.transform.translation.y = predicted.y;
-            predicted_to_world.transform.translation.z = predicted.z;
-            tf_broadcaster_->sendTransform(predicted_to_world);
-
+            cv::Point3f prediction;
+            bool shoot_flag;
+            std::tie(prediction, shoot_flag) = tracker_->get_prediction(
+                debug_bullet_speed_,
+                to_sec(now()) - to_sec(msg->header.stamp) + control_to_fire_time_
+                // img_to_fire_time = img_to_control_time + control_to_fire_time
+            );
             // 目前弹道计算直接在世界坐标系下进行。虽然和摩擦轮有一定差距，不过感觉影响不大？
-            float predicted_pitch, predicted_yaw;
-            predicted_pitch = trajectory::calc_pitch(
-                predicted_to_world.transform.translation.x,
-                predicted_to_world.transform.translation.y,
-                predicted_to_world.transform.translation.z,
+            const float predicted_pitch = trajectory::calc_pitch(
+                prediction.x,
+                prediction.y,
+                prediction.z,
                 debug_bullet_speed_
             );
-            predicted_yaw = math::rad_period_correction(
-                atan2(
-                    predicted_to_world.transform.translation.y,
-                    predicted_to_world.transform.translation.x
-                )
-                - M_PI / 2
-            );
+            const float predicted_yaw =
+                math::rad_period_correction(atan2(prediction.y, prediction.x) - M_PI / 2);
 
             if (enable_print_state_) {
                 tracker_->debug_print_state();
-                RCLCPP_INFO(
-                    get_logger(),
-                    "Pitch: %4.1f  Yaw: %4.1f (degree)",
+                std::printf(
+                    "Pitch: %4.1f  Yaw: %4.1f (degree)    Shoot_flag: %s",
                     math::r2d(predicted_pitch),
-                    math::r2d(predicted_yaw)
+                    math::r2d(predicted_yaw),
+                    (shoot_flag ? "true" : "false")
                 );
             }
-
-            /*autoaim_interfaces::msg::CommSend comm_send;
-            comm_send.header.stamp = now();
-            comm_send.found = true;
-            comm_send.pitch = math::r2d(predicted_pitch);
-            comm_send.yaw = math::r2d(predicted_yaw);
-            comm_send_->publish(comm_send);*/
+            if (enable_send_to_serial_) {
+                autoaim_interfaces::msg::CommSend comm_send;
+                comm_send.header.stamp = now();
+                comm_send.found = true;
+                comm_send.pitch = math::r2d(predicted_pitch);
+                comm_send.yaw = math::r2d(predicted_yaw);
+                comm_send_->publish(comm_send);
+            }
         }
     }
 }
@@ -247,10 +229,8 @@ void PredictionNode::camera_info_callback(const sensor_msgs::msg::CameraInfo::Sh
     camera_info_sub_ = nullptr;
 }
 
-void PredictionNode::select_armors(
-    const std::vector<Detection> src, 
-    std::vector<Detection>& dst
-) const {
+void PredictionNode::select_armors(const std::vector<Detection> src, std::vector<Detection>& dst)
+    const {
     constexpr auto get_center_x = [](const Detection& d) -> int {
         return (d.bl.x + d.br.x + d.tr.x + d.tl.x) / 4;
     };

@@ -46,7 +46,7 @@ private:
 
     bool enable_fps_;
     std::string camera_name_;
-    float exposure_, gain_;
+    float exposure_, gain_, frame_rate_;
 };
 
 CameraNode::CameraNode(const rclcpp::NodeOptions& options): Node("autoaim_camera", options) {
@@ -83,6 +83,7 @@ void CameraNode::get_parameters() {
     std::string img_pub_topic_ = declare_parameter("img_pub_topic", "/camera/color/image_raw");
     camera_name_ = declare_parameter("camera_name", "auto");
     enable_fps_ = declare_parameter("enable_fps", false);
+    frame_rate_ = declare_parameter("frame_rate", 100.0);
     exposure_ = declare_parameter("exposure", 2000.0);
     gain_ = declare_parameter("gain", 16.0);
 
@@ -123,13 +124,14 @@ void CameraNode::capture_thread() {
             camera_pub_.publish(image_msg_, camera_info_msg_);
 
             MV_CC_FreeImageBuffer(cam_handle_, &out_frame);
+
+            if (enable_fps_) {
+                RCLCPP_INFO(this->get_logger(), "Camera FPS: %.0f", get_fps());
+            }
         } else {
             RCLCPP_ERROR(this->get_logger(), "Get buffer failed! ret_val: [%x]", ret_val);
             MV_CC_StopGrabbing(cam_handle_);
             MV_CC_StartGrabbing(cam_handle_);
-        }
-        if (enable_fps_) {
-            RCLCPP_INFO(this->get_logger(), "Camera FPS: %.0f", get_fps());
         }
     }
 }
@@ -177,25 +179,32 @@ void CameraNode::start_grabbing() {
     // 设置像素格式
     catch_error(MV_CC_SetEnumValue(cam_handle_, "PixelFormat", PixelType_Gvsp_BGR8_Packed), "set pixel format");
 
-    // 启用自动gamma
-    catch_error(MV_CC_SetBoolValue(cam_handle_, "GammaEnable", true), "set gamma enable");
-    catch_error(MV_CC_SetEnumValue(cam_handle_, "GammaSelector", 2), "set gamma selector");
-
-    // 连续触发模式
-    catch_error(MV_CC_SetEnumValue(cam_handle_, "AcquisitionMode", 2), "set acquisition mode");
-    catch_error(MV_CC_SetEnumValue(cam_handle_, "TriggerMode", MV_TRIGGER_MODE_OFF), "set trigger mode");
-
-    // 手动设置曝光和增益
-    catch_error(MV_CC_SetEnumValue(cam_handle_, "ExposureAuto", 0), "set auto exposure");
-    catch_error(MV_CC_SetEnumValue(cam_handle_, "GainAuto", 0), "set auto gain");
-    catch_error(MV_CC_SetFloatValue(cam_handle_, "ExposureTime", exposure_), "set exposure time");
-    catch_error(MV_CC_SetFloatValue(cam_handle_, "Gain", gain_), "set gain");
-
     // 设置分辨率（适当裁切，与模型输入大小匹配）
     catch_error(MV_CC_SetIntValue(cam_handle_, "Width", 640), "set width");
     catch_error(MV_CC_SetIntValue(cam_handle_, "Height", 384), "set height");
     catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetX", 40), "set offset x");
     catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetY", 124), "set offset y");
+
+    // 连续触发模式
+    catch_error(MV_CC_SetEnumValue(cam_handle_, "AcquisitionMode", 2), "set acquisition mode");
+    catch_error(MV_CC_SetEnumValue(cam_handle_, "TriggerMode", MV_TRIGGER_MODE_OFF), "set trigger mode");
+
+    // 启用自动gamma
+    catch_error(MV_CC_SetBoolValue(cam_handle_, "GammaEnable", true), "set gamma enable");
+    catch_error(MV_CC_SetEnumValue(cam_handle_, "GammaSelector", 2), "set gamma selector");
+
+    // 启用自动白平衡
+    catch_error(MV_CC_SetEnumValue(cam_handle_, "BalanceWhiteAuto", 1), "set balance white auto");
+
+    // 手动设置曝光、增益（从配置文件中读取）
+    catch_error(MV_CC_SetEnumValue(cam_handle_, "ExposureAuto", 0), "set auto exposure");
+    catch_error(MV_CC_SetEnumValue(cam_handle_, "GainAuto", 0), "set auto gain");
+    catch_error(MV_CC_SetFloatValue(cam_handle_, "ExposureTime", exposure_), "set exposure time");
+    catch_error(MV_CC_SetFloatValue(cam_handle_, "Gain", gain_), "set gain");
+
+    // 设置采集帧率
+    catch_error(MV_CC_SetBoolValue(cam_handle_, "AcquisitionFrameRateEnable", true), "set frame rate enable");
+    catch_error(MV_CC_SetFloatValue(cam_handle_, "AcquisitionFrameRate", frame_rate_), "set frame rate");
 
     // 设置BGR转RGB
     catch_error(MV_CC_GetImageInfo(cam_handle_, &img_info_), "get image info");

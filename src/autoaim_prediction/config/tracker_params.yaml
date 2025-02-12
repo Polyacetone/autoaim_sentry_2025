@@ -7,13 +7,14 @@ Tracker:
   initial_radius: 0.26
   initial_height: -0.1
   min_radius: 0.2 # 用于更新惯性滤波的半径最小值
-  max_radius: 0.6 # 用于更新惯性滤波的半径最大值 ##### 注意：0.6是为了适应贼大的靶车，实际上场应为0.35 #####
+  max_radius: 0.6 # 用于更新惯性滤波的半径最大值 ##### 注意：0.6是为了适应贼大的靶车，实际上场应较小（0.35左右） #####
   switch_armor_angle: 0.87266 # 角度突变的阈值，用于判断小陀螺跟踪的装甲板是否切换。这里是50度对应的弧度
   close_radius_filter_ratio: 0.9 # 较近的装甲板对应半径的惯性滤波系数
   far_radius_filter_ratio: 0.95 # 较远的装甲板对应半径的惯性滤波系数
   close_height_filter_ratio: 0.6 # 较近的装甲板对应高度的惯性滤波系数
   far_height_filter_ratio: 0.8 # 较远的装甲板对应高度的惯性滤波系数
   antitop_palstance_threshold: 0.87266 # 启用反陀螺的角速度阈值。0.87266rad/s = 50deg/s
+  antitop_can_shoot_angle: 0.5236 # 小陀螺时，shoot_flag置为true的角度最大值。0.5236rad = 30deg
   max_lost_frames: 5 # 最大的丢失帧数。超过就从TEMP_LOST变为LOST
   converge_frames: 5 # 收敛帧数。超过则从CONVERGING变为TRACKING
 

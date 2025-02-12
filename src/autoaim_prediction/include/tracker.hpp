@@ -21,8 +21,11 @@ public:
     Tracker(const std::string& params_path);
     void push(const geometry_msgs::msg::Transform& transform);
     void update();
-    cv::Point3f get_prediction(const float bullet_speed, const float time_delay);
     void debug_print_state();
+
+    // 返回预测的坐标，和一个shoot_flag（是否开火）
+    std::tuple<cv::Point3f, bool>
+    get_prediction(const float bullet_speed, const float img_to_fire_time);
 
     TRACKER_STATUS tracker_status = TRACKER_STATUS::LOST;
 
@@ -36,6 +39,7 @@ private:
     float CLOSE_HEIGHT_FILTER_RATIO = 0.6;
     float FAR_HEIGHT_FILTER_RATIO = 0.7;
     float ANTITOP_PALSTANCE_THRESHOLD = math::d2r(50);
+    float ANTITOP_CAN_SHOOT_ANGLE = math::d2r(30);
     int MAX_LOST_FRAMES = 5;
     int CONVERGE_FRAMES = 5;
 
@@ -44,7 +48,8 @@ private:
     std::shared_ptr<UKFXY> ukf_;
     unsigned tracking_frames_ = 0; // 连续出现的帧数
     unsigned lost_frames_ = 0; // 消失的帧数
-    unsigned observing_armor_id_ = 0; // 正在观测的装甲板编号。定义第一块看到的装甲板为0，车逆时针转时看到的依次编号1、2、3
+    unsigned observing_armor_id_ =
+        0; // 正在观测的装甲板编号。定义第一块看到的装甲板为0，车逆时针转时看到的依次编号1、2、3
     float radius_[2]; // radius_[0]对应0、2装甲板半径，radius_[1]对应1、3
     float height_[2]; // height_[0]对应0、2装甲板中心z坐标，height_[1]对应1、3
     float yaw_; // 0号装甲板累积旋转角度
@@ -155,21 +160,25 @@ void Tracker::update() {
     prev = now;
 }
 
-cv::Point3f Tracker::get_prediction(const float bullet_speed, const float time_delay) {
+std::tuple<cv::Point3f, bool>
+Tracker::get_prediction(const float bullet_speed, const float img_to_fire_time) {
     if (abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD) { // 平动，只用KFXYZ预测
         // 理论上来说要精确求出这里的击打时间需要解一个方程，这里为了简化直接采用一阶近似
-        const float hit_time = time_delay
-            + math::get_distance(kf_xyz_->position + time_delay * kf_xyz_->velocity) / bullet_speed;
-        return kf_xyz_->position + hit_time * kf_xyz_->velocity;
+        // img_to_hit_time = img_to_fire_time + fire_to_hit_time
+        const float img_to_hit_time = img_to_fire_time
+            + math::get_distance(kf_xyz_->position + img_to_fire_time * kf_xyz_->velocity) / bullet_speed;
+        // 平动时，总是能开火
+        return std::make_tuple(kf_xyz_->position + img_to_hit_time * kf_xyz_->velocity, true);
     } else { // 转动，用KFYaw和UKFXY预测
-        // 同上，hit_time为一阶近似
-        const float hit_time = time_delay
-            + math::get_distance(ukf_->position + time_delay * ukf_->velocity) / bullet_speed;
-        const cv::Point2f pred_pos = ukf_->position + ukf_->velocity * hit_time;
-        const float pred_yaw = kf_yaw_->yaw + kf_yaw_->palstance * hit_time;
+        // 同上，img_to_hit_time为一阶近似
+        // img_to_hit_time = img_to_fire_time + fire_to_hit_time
+        const float img_to_hit_time = img_to_fire_time
+            + math::get_distance(ukf_->position + img_to_fire_time * ukf_->velocity) / bullet_speed;
+        const cv::Point2f pred_pos = ukf_->position + ukf_->velocity * img_to_hit_time;
+        const float pred_yaw = kf_yaw_->yaw + kf_yaw_->palstance * img_to_hit_time;
         float target_angle = M_PI / 2;
         int target_armor_index = 0;
-        // 选择在hit_time之后，角度最小（即最面向我们）的那个装甲板
+        // 选择在img_to_hit_time之后，角度最小（即最面向我们）的那个装甲板
         for (int i = 0; i < 4; i++) {
             const float pred_angle = math::rad_period_correction(pred_yaw + i * M_PI / 2);
             if (abs(pred_angle) < abs(target_angle)) {
@@ -177,11 +186,13 @@ cv::Point3f Tracker::get_prediction(const float bullet_speed, const float time_d
                 target_armor_index = (observing_armor_id_ + i) % 2;
             }
         }
-        return cv::Point3f(
+        const cv::Point3f prediction = cv::Point3f(
             pred_pos.x + sin(target_angle) * radius_[target_armor_index],
             pred_pos.y - cos(target_angle) * radius_[target_armor_index],
             height_[target_armor_index]
         );
+        const bool shoot_flag = abs(target_angle) < ANTITOP_CAN_SHOOT_ANGLE;
+        return std::make_tuple(prediction, shoot_flag);
     }
 }
 
@@ -226,6 +237,7 @@ void Tracker::load_params(const std::string& params_path) {
     fs["Tracker"]["close_height_filter_ratio"] >> CLOSE_HEIGHT_FILTER_RATIO;
     fs["Tracker"]["far_height_filter_ratio"] >> FAR_HEIGHT_FILTER_RATIO;
     fs["Tracker"]["antitop_palstance_threshold"] >> ANTITOP_PALSTANCE_THRESHOLD;
+    fs["Tracker"]["antitop_can_shoot_angle"] >> ANTITOP_CAN_SHOOT_ANGLE;
     fs["Tracker"]["max_lost_frames"] >> MAX_LOST_FRAMES;
     fs["Tracker"]["converge_frames"] >> CONVERGE_FRAMES;
     fs.release();

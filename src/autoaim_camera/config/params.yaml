@@ -3,6 +3,7 @@ autoaim_camera:
     enable_fps: false # 是否显示相机帧率
     camera_name: "auto" # 相机的名称，可以在MVS里面设定
 
+    frame_rate: 100.0
     exposure: 2000.0
     gain: 16.0
 
