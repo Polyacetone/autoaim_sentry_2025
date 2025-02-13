@@ -12,11 +12,9 @@ find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/CommSend.msg"
   "msg/Detection.msg"
-  "msg/CommRecv.msg"
-  "msg/DebugMsg.msg"
   "msg/DetectionArray.msg"
+  "msg/ShootPos.msg"
 
   DEPENDENCIES
     std_msgs

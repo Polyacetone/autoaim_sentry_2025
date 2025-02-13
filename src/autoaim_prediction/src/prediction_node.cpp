@@ -10,7 +10,7 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
 #include <autoaim_interfaces/msg/detection_array.hpp>
-#include <autoaim_interfaces/msg/comm_send.hpp>
+#include <autoaim_interfaces/msg/shoot_pos.hpp>
 
 #include <pnp_solver.hpp>
 #include <trisection_yaw.hpp>
@@ -71,10 +71,6 @@ private:
     float debug_bullet_speed_;
     float control_to_fire_time_;
 
-    std::string camera_info_topic_;
-    std::string detection_sub_topic_;
-    std::string comm_pub_topic_;
-
     std::shared_ptr<tf2_ros::StaticTransformBroadcaster> tf_static_broadcaster_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -82,7 +78,7 @@ private:
 
     std::shared_ptr<rclcpp::Subscription<DetectionArray>> detection_sub_;
     std::shared_ptr<rclcpp::Subscription<sensor_msgs::msg::CameraInfo>> camera_info_sub_;
-    std::shared_ptr<rclcpp::Publisher<autoaim_interfaces::msg::CommSend>> comm_send_;
+    std::shared_ptr<rclcpp::Publisher<autoaim_interfaces::msg::ShootPos>> shoot_pos_pub_;
 
     std::shared_ptr<PnPSolver> pnp_solver_;
     std::shared_ptr<TrisectionYaw> trisection_yaw_;
@@ -104,18 +100,6 @@ PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
     tracker_ = std::make_shared<Tracker>(tracker_params_path);
 
     get_parameters();
-
-    camera_info_sub_ = create_subscription<sensor_msgs::msg::CameraInfo>(
-        camera_info_topic_,
-        10,
-        [&](const sensor_msgs::msg::CameraInfo::SharedPtr msg) { camera_info_callback(msg); }
-    );
-    detection_sub_ = create_subscription<DetectionArray>(
-        detection_sub_topic_,
-        10,
-        [&](const DetectionArray::SharedPtr msg) { detection_callback(msg); }
-    );
-    comm_send_ = create_publisher<autoaim_interfaces::msg::CommSend>(comm_pub_topic_, 10);
 }
 
 void PredictionNode::get_parameters() {
@@ -128,9 +112,21 @@ void PredictionNode::get_parameters() {
     debug_buff_mode_ = declare_parameter("debug_buff_mode", 1);
     debug_bullet_speed_ = declare_parameter("debug_bullet_speed", 30.0);
     control_to_fire_time_ = declare_parameter("control_to_fire_time", 0.098);
-    camera_info_topic_ = declare_parameter("camera_info_topic", "/camera/color/camera_info");
-    detection_sub_topic_ = declare_parameter("detection_sub_topic", "/detection");
-    comm_pub_topic_ = declare_parameter("comm_pub_topic", "/serial/comm_send");
+    
+    std::string camera_info_topic = declare_parameter("camera_info_topic", "/camera/color/camera_info");
+    std::string detection_sub_topic = declare_parameter("detection_sub_topic", "/detection");
+    std::string shoot_pos_pub_topic = declare_parameter("shoot_pos_pub_topic", "/serial/shoot_pos");
+    camera_info_sub_ = create_subscription<sensor_msgs::msg::CameraInfo>(
+        camera_info_topic,
+        10,
+        [&](const sensor_msgs::msg::CameraInfo::SharedPtr msg) { camera_info_callback(msg); }
+    );
+    detection_sub_ = create_subscription<DetectionArray>(
+        detection_sub_topic,
+        10,
+        [&](const DetectionArray::SharedPtr msg) { detection_callback(msg); }
+    );
+    shoot_pos_pub_ = create_publisher<autoaim_interfaces::msg::ShootPos>(shoot_pos_pub_topic, 10);
 
     const double cam_to_gimbal_x = declare_parameter("cam_to_gimbal_x", 0.0);
     const double cam_to_gimbal_y = declare_parameter("cam_to_gimbal_y", 0.0658);
@@ -204,12 +200,13 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
                 );
             }
             if (enable_send_to_serial_) {
-                autoaim_interfaces::msg::CommSend comm_send;
-                comm_send.header.stamp = now();
-                comm_send.found = true;
-                comm_send.pitch = math::r2d(predicted_pitch);
-                comm_send.yaw = math::r2d(predicted_yaw);
-                comm_send_->publish(comm_send);
+                autoaim_interfaces::msg::ShootPos shoot_pos;
+                shoot_pos.header.stamp = now();
+                shoot_pos.found = true;
+                shoot_pos.shoot_flag = shoot_flag;
+                shoot_pos.pitch = math::r2d(predicted_pitch);
+                shoot_pos.yaw = math::r2d(predicted_yaw);
+                shoot_pos_pub_->publish(shoot_pos);
             }
         }
     }
@@ -229,8 +226,10 @@ void PredictionNode::camera_info_callback(const sensor_msgs::msg::CameraInfo::Sh
     camera_info_sub_ = nullptr;
 }
 
-void PredictionNode::select_armors(const std::vector<Detection> src, std::vector<Detection>& dst)
-    const {
+void PredictionNode::select_armors(
+    const std::vector<Detection> src, 
+    std::vector<Detection>& dst
+) const {
     constexpr auto get_center_x = [](const Detection& d) -> int {
         return (d.bl.x + d.br.x + d.tr.x + d.tl.x) / 4;
     };

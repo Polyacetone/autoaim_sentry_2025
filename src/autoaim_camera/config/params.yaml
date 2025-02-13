@@ -2,8 +2,9 @@ autoaim_camera:
   ros__parameters:
     enable_fps: false # 是否显示相机帧率
     camera_name: "auto" # 相机的名称，可以在MVS里面设定
+    enable_imu_trigger: false # 是否启用硬触发
 
-    frame_rate: 100.0
+    frame_rate: 100.0 # 仅在连续触发模式生效
     exposure: 2000.0
     gain: 16.0
 

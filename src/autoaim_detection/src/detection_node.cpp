@@ -1,6 +1,5 @@
 #include <infer_engine.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
-#include <autoaim_interfaces/msg/comm_recv.hpp>
 #include <autoaim_interfaces/msg/detection_array.hpp>
 
 namespace autoaim_detection {
@@ -17,10 +16,6 @@ public:
     YoloDetectNode(const rclcpp::NodeOptions& options): Node("autoaim_detection", options) {
         get_parameters();
 
-        auto parameter_change_cb =
-            std::bind(&YoloDetectNode::parameter_callback, this, std::placeholders::_1);
-        reset_param_handler_ = this->add_on_set_parameters_callback(parameter_change_cb);
-
         RCLCPP_INFO(this->get_logger(), "初始化YOLO...");
         Config config = {confidence_threshold_, nms_threshold_, num_colors_, num_tags_, onnx_path_};
         infer_engine_ = create_infer_engine(config);
@@ -36,36 +31,6 @@ public:
             this->create_publisher<autoaim_interfaces::msg::DetectionArray>(detection_topic_, 10);
         img_detected_pub_ =
             this->create_publisher<sensor_msgs::msg::Image>(img_detected_topic_, 10);
-        sub_enemy_info_ = this->create_subscription<autoaim_interfaces::msg::CommRecv>(
-            enemy_info_topic_,
-            10,
-            std::bind(&YoloDetectNode::enemy_info_callback, this, std::placeholders::_1)
-        );
-    }
-    rcl_interfaces::msg::SetParametersResult
-    parameter_callback(const std::vector<rclcpp::Parameter>& parameters) {
-        auto result = rcl_interfaces::msg::SetParametersResult();
-        result.successful = true;
-        for (const auto& parameter: parameters) {
-            RCLCPP_INFO(
-                this->get_logger(),
-                "Setting parameter '%s' to '%s'",
-                parameter.get_name().c_str(),
-                parameter.value_to_string().c_str()
-            );
-            if (parameter.get_name() == "image_topic") {
-                img_topic_ = parameter.as_string();
-                RCLCPP_INFO(this->get_logger(), "image_topic changed to %s", img_topic_.c_str());
-            } else {
-                RCLCPP_ERROR(
-                    this->get_logger(),
-                    "Parameter '%s' not defined",
-                    parameter.get_name().c_str()
-                );
-                result.successful = false;
-            }
-        }
-        return result;
     }
 
 private:
@@ -85,9 +50,6 @@ private:
     int target_color_;
 
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr img_sub_;
-    rclcpp::Subscription<autoaim_interfaces::msg::CommRecv>::SharedPtr sub_enemy_info_;
-    OnSetParametersCallbackHandle::SharedPtr reset_param_handler_;
-
     rclcpp::Publisher<autoaim_interfaces::msg::DetectionArray>::SharedPtr detection_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_detected_pub_;
 
@@ -109,23 +71,6 @@ private:
         num_tags_ = declare_parameter<int>("num_tags", 6);
         confidence_threshold_ = declare_parameter<float>("confidence_threshold", 0.5);
         nms_threshold_ = declare_parameter<float>("nms_threshold", 0.5);
-    }
-
-    void enemy_info_callback(const autoaim_interfaces::msg::CommRecv::SharedPtr msg) {
-        target_color_ = msg->target_color;
-        num_balance_ = msg->balance_target_list;
-    }
-
-    void filter(std::vector<autoaim_interfaces::msg::Detection>& detection_vec) {
-        for (auto it = detection_vec.begin(); it != detection_vec.end();) {
-            bool wrongColor = it->color == COLOR::GRAY || it->color == COLOR::PURPLE
-                || it->color != target_color_;
-            if (wrongColor) {
-                it = detection_vec.erase(it);
-            } else {
-                ++it;
-            }
-        }
     }
 
     void img_callback(const sensor_msgs::msg::Image::SharedPtr msg) {

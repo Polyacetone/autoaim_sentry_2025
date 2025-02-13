@@ -18,4 +18,4 @@ autoaim_prediction:
 
     camera_info_topic: "/camera/color/camera_info"
     detection_sub_topic: "/detection"
-    comm_pub_topic: "/serial/comm_send"
+    shoot_pos_pub_topic: "/serial/shoot_pos"
