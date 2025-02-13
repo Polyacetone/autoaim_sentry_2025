@@ -61,6 +61,9 @@ private:
     // 选择目标颜色和标签的装甲板，并按照一定规则进行排序
     void select_armors(const std::vector<Detection> src, std::vector<Detection>& dst) const;
 
+    // 获取指定时间的自己云台的yaw（相对于世界坐标系）
+    float get_gimbal_yaw(const rclcpp::Time& time_point) const;
+
     bool enable_print_state_;
     bool enable_send_to_serial_;
     bool enable_debug_;
@@ -168,14 +171,20 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             if (armor_to_world != EMPTY_TRANSFORM) {
                 tracker_->push(armor_to_world);
             } else {
-                RCLCPP_WARN(get_logger(), "Get transform failed.");
+                RCLCPP_ERROR(
+                    get_logger(), 
+                    "Failed to get transform from %s to world.", 
+                    armor_name.c_str()
+                );
             }
         }
         tracker_->update();
         if (tracker_->tracker_status == TRACKER_STATUS::TRACKING) {
+            const float gimbal_yaw = get_gimbal_yaw(msg->header.stamp);
             cv::Point3f prediction;
             bool shoot_flag;
             std::tie(prediction, shoot_flag) = tracker_->get_prediction(
+                gimbal_yaw,
                 debug_bullet_speed_,
                 to_sec(now()) - to_sec(msg->header.stamp) + control_to_fire_time_
                 // img_to_fire_time = img_to_control_time + control_to_fire_time
@@ -193,7 +202,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             if (enable_print_state_) {
                 tracker_->debug_print_state();
                 std::printf(
-                    "Pitch: %4.1f  Yaw: %4.1f (degree)    Shoot_flag: %s",
+                    "Pitch: %4.1f  Yaw: %4.1f (degree)    Shoot_flag: %s\n",
                     math::r2d(predicted_pitch),
                     math::r2d(predicted_yaw),
                     (shoot_flag ? "true" : "false")
@@ -325,6 +334,26 @@ geometry_msgs::msg::Transform PredictionNode::try_get_transform(
         }
     }
     return transform;
+}
+
+float PredictionNode::get_gimbal_yaw(const rclcpp::Time& time_point) const {
+    geometry_msgs::msg::Transform transform;
+    try {
+        transform = tf_buffer_->lookupTransform("world", "gimbal", time_point).transform;
+    } catch (const std::exception& ex) {
+        RCLCPP_ERROR(get_logger(), "Failed to get transform from gimbal to world.");
+        return 0;
+    }
+    double roll, pitch, yaw;
+    tf2::Quaternion quat(
+        transform.rotation.x, 
+        transform.rotation.y, 
+        transform.rotation.z, 
+        transform.rotation.w
+    );
+    tf2::Matrix3x3 rot_mat(quat);
+    rot_mat.getRPY(roll, pitch, yaw);
+    return yaw;
 }
 } // namespace autoaim_prediction
 

@@ -20,8 +20,7 @@ public:
             0, 0, 0, 0, 1, 0,
             0, 0, 0, 0, 0, 1
         );
-        cv::setIdentity(cvkf_xyz_.measurementMatrix);
-        cv::setIdentity(cvkf_xyz_.errorCovPost, cv::Scalar::all(1.0));
+        initialize(cv::Point3f(0, 0, 0));
     }
 
     void initialize(const cv::Point3f& meas) {
@@ -31,6 +30,8 @@ public:
         cvkf_xyz_.statePost.at<float>(3) = 0;
         cvkf_xyz_.statePost.at<float>(4) = 0;
         cvkf_xyz_.statePost.at<float>(5) = 0;
+        cv::setIdentity(cvkf_xyz_.measurementMatrix);
+        cv::setIdentity(cvkf_xyz_.errorCovPost, cv::Scalar::all(1.0));
     }
 
     void update(const cv::Point3f& meas) {
@@ -86,13 +87,14 @@ public:
             1, 1,
             0, 1
         );
-        cv::setIdentity(cvkf_theta_.measurementMatrix);
-        cv::setIdentity(cvkf_theta_.errorCovPost, cv::Scalar::all(1.0));
+        initialize(0);
     }
 
     void initialize(const float meas) {
         cvkf_theta_.statePost.at<float>(0) = meas;
         cvkf_theta_.statePost.at<float>(1) = 0;
+        cv::setIdentity(cvkf_theta_.measurementMatrix);
+        cv::setIdentity(cvkf_theta_.errorCovPost, cv::Scalar::all(1.0));
     }
 
     void update(const float meas) {
@@ -132,7 +134,12 @@ public:
         beta(2),
         kappa(0) {
         load_params(params_path);
+        initialize(cv::Point2f(0, 0));
+    }
+
+    void initialize(const cv::Point2f& position) {
         x = Eigen::VectorXf::Zero(state_dim);
+        x << position.x, position.y, 0, 0;
         P = Eigen::MatrixXf::Identity(state_dim, state_dim);
         weights_mean = Eigen::VectorXf(n_sigma_points);
         weights_cov = Eigen::VectorXf(n_sigma_points);
@@ -144,11 +151,6 @@ public:
             weights_mean(i) = 1 / (2 * (state_dim + lambda));
             weights_cov(i) = weights_mean(i);
         }
-    }
-
-    void initialize(const cv::Point2f& position) {
-        x = Eigen::VectorXf::Zero(state_dim);
-        x << position.x, position.y, 0, 0;
     }
 
     void predict(float time_elapsed) {

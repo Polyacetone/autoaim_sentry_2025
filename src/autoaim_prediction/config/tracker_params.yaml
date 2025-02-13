@@ -23,48 +23,48 @@ KFXYZ:
     rows: 6
     cols: 6
     dt: f
-    data: [ 1e-2,  0,  0,  0,  0,  0,
-            0,  1e-2,  0,  0,  0,  0,
-            0,  0,  1e-2,  0,  0,  0,
-            0,  0,  0,  1e-2,  0,  0,
-            0,  0,  0,  0,  1e-2,  0,
-            0,  0,  0,  0,  0,  1e-2 ]
+    data: [ 1e-7,  0,  0,  0,  0,  0,
+            0,  1e-7,  0,  0,  0,  0,
+            0,  0,  1e-7,  0,  0,  0,
+            0,  0,  0,  1e-10,  0,  0,
+            0,  0,  0,  0,  1e-10,  0,
+            0,  0,  0,  0,  0,  1e-10 ]
 
   measurement_noise_cov: !!opencv-matrix
     rows: 3
     cols: 3
     dt: f
-    data: [ 1e-2,  0,  0,
-            0,  1e-2,  0,
-            0,  0,  1e-2 ]
+    data: [ 1e-4,  0,  0,
+            0,  1e-4,  0,
+            0,  0,  1e-4 ]
 
 KFYaw:
   process_noise_cov: !!opencv-matrix
     rows: 2
     cols: 2
     dt: f
-    data: [ 1e-2,  0, 
-            0,  1e-2 ]
+    data: [ 1e-7,  0, 
+            0,  1e-4 ]
 
   measurement_noise_cov: !!opencv-matrix
     rows: 1
     cols: 1
     dt: f
-    data: [ 6e-2 ]
+    data: [ 1e-2 ]
 
 UKFXY:
   process_noise_cov: !!opencv-matrix
     rows: 4
     cols: 4
     dt: f
-    data: [ 1e-2,  0,  0,  0,
-            0,  1e-2,  0,  0,
-            0,  0,  1e-2,  0,
-            0,  0,  0,  1e-2 ]
+    data: [ 1e-6,  0,  0,  0,
+            0,  1e-6,  0,  0,
+            0,  0,  1e-3,  0,
+            0,  0,  0,  1e-3 ]
 
   measurement_noise_cov: !!opencv-matrix
     rows: 2
     cols: 2
     dt: f
-    data: [ 3e-2,  0,
-            0,  3e-2 ]
+    data: [ 1e-1,  0,
+            0,  1e-1 ]
