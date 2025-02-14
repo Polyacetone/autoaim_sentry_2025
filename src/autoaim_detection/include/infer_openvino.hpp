@@ -4,6 +4,8 @@
 #include "cv_bridge/cv_bridge.h"
 #include <autoaim_interfaces/msg/detection_array.hpp>
 
+#include <check_armor.hpp>
+
 enum COLOR { GRAY = 0, BLUE = 1, RED = 2, PURPLE = 3 };
 
 struct Config {
@@ -202,7 +204,9 @@ void OpenVINOInferEngine::postprocess() {
     nms(boxes, result);
     detection_arr_msg.detections.clear();
     for (const int index: result) {
-        detection_arr_msg.detections.push_back(detections[index]);
+        if (check_armor::check_armor_shape(detections[index])) {
+            detection_arr_msg.detections.push_back(detections[index]);
+        }
     }
 }
 
