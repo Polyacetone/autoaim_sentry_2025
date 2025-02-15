@@ -61,8 +61,9 @@ private:
     // 选择目标颜色和标签的装甲板，并按照一定规则进行排序
     void select_armors(const std::vector<Detection> src, std::vector<Detection>& dst) const;
 
-    // 获取指定时间的自己云台的yaw（相对于世界坐标系）
-    float get_gimbal_yaw(const rclcpp::Time& time_point) const;
+    // 获取指定时间的自己云台的yaw, pitch, roll（相对于世界坐标系）。
+    // 之所以是ypr不是rpy，是因为我们采用的旋转顺序是yaw, pitch, roll。
+    std::tuple<float, float, float> get_gimbal_ypr(const rclcpp::Time& time_point) const;
 
     bool enable_print_state_;
     bool enable_send_to_serial_;
@@ -150,6 +151,9 @@ void PredictionNode::get_parameters() {
 }
 
 void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) const {
+    std::tuple<float, float, float> gimbal_ypr = get_gimbal_ypr(msg->header.stamp);
+    float gimbal_yaw, gimbal_pitch, gimbal_roll;
+    std::tie(gimbal_yaw, gimbal_pitch, gimbal_roll) = gimbal_ypr;
     if (enable_debug_ && debug_mode_ == false) {
         std::vector<Detection> target_armors;
         select_armors(msg->detections, target_armors);
@@ -163,7 +167,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             armor_to_cam.child_frame_id = armor_name;
             // 计算装甲板相对于相机坐标系的位姿
             pnp_solver_->solve_pnp(armor, armor_to_cam.transform);
-            trisection_yaw_->get_rotation(armor, armor_to_cam.transform);
+            trisection_yaw_->get_rotation(armor, armor_to_cam.transform, gimbal_ypr);
             tf_broadcaster_->sendTransform(armor_to_cam);
             // 把装甲板的位姿转换到世界坐标系（原点为云台和小yaw转动的中心，方向为imu初始化时的方向）下进行滤波
             // 尽可能降低自己车的转动对跟踪器的影响。不过由于目前似乎没有有效的精准定位手段，还不能消除平动影响
@@ -179,8 +183,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             }
         }
         tracker_->update();
-        if (tracker_->tracker_status == TRACKER_STATUS::TRACKING) {
-            const float gimbal_yaw = get_gimbal_yaw(msg->header.stamp);
+        if (tracker_->tracker_status != TRACKER_STATUS::LOST) {
             cv::Point3f prediction;
             bool shoot_flag;
             std::tie(prediction, shoot_flag) = tracker_->get_prediction(
@@ -208,7 +211,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
                     (shoot_flag ? "true" : "false")
                 );
             }
-            if (enable_send_to_serial_) {
+            if (enable_send_to_serial_ && tracker_->tracker_status != TRACKER_STATUS::TEMP_LOST) {
                 autoaim_interfaces::msg::ShootPos shoot_pos;
                 shoot_pos.header.stamp = now();
                 shoot_pos.found = true;
@@ -336,15 +339,16 @@ geometry_msgs::msg::Transform PredictionNode::try_get_transform(
     return transform;
 }
 
-float PredictionNode::get_gimbal_yaw(const rclcpp::Time& time_point) const {
+std::tuple<float, float, float> 
+PredictionNode::get_gimbal_ypr(const rclcpp::Time& time_point) const {
     geometry_msgs::msg::Transform transform;
     try {
         transform = tf_buffer_->lookupTransform("world", "gimbal", time_point).transform;
     } catch (const std::exception& ex) {
         RCLCPP_ERROR(get_logger(), "Failed to get transform from gimbal to world.");
-        return 0;
+        return std::make_tuple(0, 0, 0);
     }
-    double roll, pitch, yaw;
+    double yaw, pitch, roll;
     tf2::Quaternion quat(
         transform.rotation.x, 
         transform.rotation.y, 
@@ -352,8 +356,11 @@ float PredictionNode::get_gimbal_yaw(const rclcpp::Time& time_point) const {
         transform.rotation.w
     );
     tf2::Matrix3x3 rot_mat(quat);
-    rot_mat.getRPY(roll, pitch, yaw);
-    return yaw;
+    rot_mat.getEulerYPR(yaw, pitch, roll);
+    // ros2认为x向前，y向左，z向上。roll绕x轴转，pitch绕y轴转，yaw绕z轴转。
+    // 我们认为x向右，y向前，z向上。roll绕y轴转，pitch绕x轴转，yaw绕z轴转。
+    // 所以roll和yaw和我们一样，但pitch是反的。
+    return std::make_tuple(yaw, -pitch, roll);
 }
 } // namespace autoaim_prediction
 

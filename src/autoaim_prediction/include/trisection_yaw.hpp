@@ -21,14 +21,15 @@ public:
         @brief 使用降自由度的重投影求装甲板yaw角。
         @param detection yolo识别结果，需要知道装甲板的2D角点坐标，和装甲板标签（用于判断装甲板大小）。
         @param transform 需要从这里读取pnp得到的装甲板中心点坐标（相机系下），并向这里写入计算得到的旋转（装甲板系相对于相机系）。
-        @param prior_yaw 先验估计的yaw角。可以不填。
-        @attention 相机坐标系定义与opencv一致（向右是x，向下是y，向前是z），装甲板坐标系定义是正常的（向右是x，向前是y，向上是z）。
-        yaw角定义为装甲板向心方向的法向量在水平面的投影与正前方的夹角，范围-pi/2~pi/2，逆时针为正。
+        @param gimbal_rpy 自己云台相对于世界系的roll, pitch, yaw。用于估计装甲板相对于云台（gimbal）系的pitch，以降自由度。
+        @note 相机坐标系定义与opencv一致（向右是x，向下是y，向前是z），装甲板坐标系和云台系定义是正常的（向右是x，向前是y，向上是z）。
+        由于相机系是倒转的，云台和世界系方向都是正常的，且云台与相机的旋转是固连的，所以目标装甲板的旋转以云台系为参考更符合直觉。
+        但由于云台系中心离相机有一定的距离，所以位移还是应当以相机系为参考。
     */
     void get_rotation(
         const autoaim_interfaces::msg::Detection& detection,
         geometry_msgs::msg::Transform& transform,
-        const float prior_yaw = M_PI / 4
+        const std::tuple<float, float, float>& gimbal_rpy
     ) const;
 
 private:
@@ -45,23 +46,25 @@ private:
     ) const;
 
     /*!
-        @brief 计算旋转角对应的装甲板角点坐标（3D）。
+        @brief 计算旋转角（armor_yaw）对应的装甲板角点坐标（3D）。
         @param armor_center 装甲板中心的3D坐标（基于opencv的相机系）。
         @param armor_label 装甲板的标签。用于判断装甲板大小。
-        @param armor_yaw 装甲板旋转的yaw角。
-        @attention 相机坐标系定义与opencv一致（向右是x，向下是y，向前是z）。
-        yaw角定义为装甲板向心方向的法向量在水平面的投影与正前方的夹角，范围-pi/2~pi/2，逆时针为正。
+        @param armor_pitch 装甲板在gimbal系下的pitch角，是已知的（因为云台相对于世界的pitch和装甲板相对于世界的pitch均已知）。
+        @param armor_yaw 装甲板在gimbal系下的yaw角，作为未知量由三分法传入。
+        @note 相机坐标系定义与opencv一致（向右是x，向下是y，向前是z）。
+        yaw角定义为装甲板向心方向法向量的水平投影与云台正前方的水平投影的夹角，范围-pi/2~pi/2，逆时针为正。
     */
     std::vector<cv::Point3f> spin_armor_3d(
         const cv::Point3f& armor_center, 
-        const int armor_label, 
-        const float& armor_yaw
+        const int armor_label,
+        const float armor_pitch,
+        const float armor_yaw
     ) const;
 
     /*!
         @brief 将3D点投影到2D。
         @param object_pts 装甲板的四个角点的3D坐标（基于opencv的相机系）。
-        @attention 相机坐标系定义与opencv一致（向右是x，向下是y，向前是z）。
+        @note 相机坐标系定义与opencv一致（向右是x，向下是y，向前是z）。
     */
     std::vector<cv::Point2f> project_3d_to_2d(const std::vector<cv::Point3f>& object_pts) const;
 
@@ -73,10 +76,9 @@ private:
         const int iterations
     ) const;
 
-    static constexpr int FIND_ANGLE_ITERATIONS = 12; // 三分法迭代次数，理想精度<1
+    static constexpr int FIND_ANGLE_ITERATIONS = 15; // 三分法迭代次数，理想精度<1
     static constexpr float SIMPLE_TOP_TRACK_AREA_RATIO = 2.0;
     static constexpr float DETECTOR_ERROR_PIXEL_BY_SLOPE = 2.0;
-    static constexpr float ARMOR_PITCH = 15.0 / 180.0 * M_PI;
 
     // 单位: 米
     static constexpr float HEIGHT = 0.055;
@@ -95,8 +97,10 @@ void TrisectionYaw::set_cam_matrix(const cv::Mat intrinsic, const cv::Mat distor
 void TrisectionYaw::get_rotation(
     const autoaim_interfaces::msg::Detection& detection,
     geometry_msgs::msg::Transform& transform,
-    const float prior_yaw
+    const std::tuple<float, float, float>& gimbal_ypr
 ) const {
+    float gimbal_yaw, gimbal_pitch, gimbal_roll;
+    std::tie(gimbal_yaw, gimbal_pitch, gimbal_roll) = gimbal_ypr;
     const std::vector<cv::Point2f> image_pts {
         {detection.tl.x, detection.tl.y},
         {detection.bl.x, detection.bl.y},
@@ -110,17 +114,17 @@ void TrisectionYaw::get_rotation(
     };
     std::function cost_func = [&](float yaw) -> float {
         std::vector<cv::Point3f> spinned_armor_pts =
-            spin_armor_3d(armor_center, detection.label, yaw);
+            spin_armor_3d(armor_center, detection.label, gimbal_pitch + math::d2r(15), yaw);
         std::vector<cv::Point2f> spinned_armor_pts_2d = project_3d_to_2d(spinned_armor_pts);
-        return get_pts_cost(image_pts, spinned_armor_pts_2d, prior_yaw);
+        return get_pts_cost(image_pts, spinned_armor_pts_2d, M_PI / 4);
     };
     const float armor_yaw =
         trisection_find_min(-M_PI / 2, M_PI / 2, cost_func, FIND_ANGLE_ITERATIONS).first;
     tf2::Quaternion quaternion;
     // 相机坐标系定义与opencv一致（向右是x，向下是y，向前是z），装甲板坐标系定义是正常的（向右是x，向前是y，向上是z）。
     // 这里用的pi/2 - pitch是为了把相机坐标系方向转成正常坐标系的方向。
-    // setEuler旋转顺序：先绕Y，再绕X，最后绕Z。
-    quaternion.setEuler(-armor_yaw, M_PI / 2 - ARMOR_PITCH, 0);
+    // setEuler旋转顺序：ros2的系（前x，左y，上z）中是XYZ，但在我们的系（右x，前y，上z）里是YXZ。
+    quaternion.setEuler(-armor_yaw, M_PI / 2 - gimbal_pitch - math::d2r(15), 0);
     transform.rotation.x = quaternion.getX();
     transform.rotation.y = quaternion.getY();
     transform.rotation.z = quaternion.getZ();
@@ -164,14 +168,15 @@ float TrisectionYaw::get_pts_cost(
 std::vector<cv::Point3f> TrisectionYaw::spin_armor_3d(
     const cv::Point3f& armor_center,
     const int armor_label,
-    const float& armor_yaw
+    const float armor_pitch,
+    const float armor_yaw
 ) const {
     const float WIDTH = (armor_label == 1) ? BIG_WIDTH : SMALL_WIDTH;
     const cv::Point3f width_vec = cv::Point3f(cos(armor_yaw), 0, sin(armor_yaw)) * (WIDTH / 2);
     const cv::Point3f height_vec = cv::Point3f(
-        sin(ARMOR_PITCH) * sin(armor_yaw),
-        cos(ARMOR_PITCH),
-        -sin(ARMOR_PITCH) * cos(armor_yaw)
+        sin(armor_pitch) * sin(armor_yaw),
+        cos(armor_pitch),
+        -sin(armor_pitch) * cos(armor_yaw)
     ) * (HEIGHT / 2);
     const std::vector<cv::Point3f> corners {
         armor_center - width_vec - height_vec,

@@ -16,7 +16,7 @@ public:
         @param transform 输出的装甲板坐标系到相机坐标系的变换。
         虽然translation和rotation都写入了，不过鉴于后面有个重投影会再算出rotation，所以写入的rotation目前是没用的。
         @return 返回1表示找解的时候出现问题（不过这种情况好像不常出现？目前好像没处理）。
-        @attention 相机坐标系定义与opencv一致（向右是x，向下是y，向前是z），装甲板坐标系定义是正常的（向右是x，向前是y，向上是z）。
+        @note 相机坐标系定义与opencv一致（向右是x，向下是y，向前是z），装甲板坐标系定义是正常的（向右是x，向前是y，向上是z）。
     */
     bool solve_pnp(
         const autoaim_interfaces::msg::Detection& detection,
