@@ -11,14 +11,13 @@
 class PnPSolver {
 public:
     /*!
-        @brief 使用IPPE解PnP
+        @brief 使用IPPE解PnP获取位移translation
         @param detection 输入的4个角点位置，以及装甲板标签（用于判断装甲板大小）。
-        @param transform 输出的装甲板坐标系到相机坐标系的变换。
-        虽然translation和rotation都写入了，不过鉴于后面有个重投影会再算出rotation，所以写入的rotation目前是没用的。
+        @param transform 输出的装甲板坐标系到相机坐标系的变换（只写入translation，实际上就是装甲板中心在相机系下的位置）。
         @return 返回1表示找解的时候出现问题（不过这种情况好像不常出现？目前好像没处理）。
-        @note 相机坐标系定义与opencv一致（向右是x，向下是y，向前是z），装甲板坐标系定义是正常的（向右是x，向前是y，向上是z）。
+        @note 相机坐标系和装甲板坐标系方向都是向右x，向前y，向上z。
     */
-    bool solve_pnp(
+    bool get_translation(
         const autoaim_interfaces::msg::Detection& detection,
         geometry_msgs::msg::Transform& transform
     ) const {
@@ -49,23 +48,13 @@ public:
         } else {
             return 1;
         }
+        // opencv的solvePnP认为相机系是向右x，向下y，向前z。
+        // 我们（在tf2中发布的）认为相机系是向右x，向前y，向上z。
+        // 所以我们的(x, y, z)对应opencv的(x, z, -y)。
+        // PnP解出的旋转没有使用，因为后面用三分法算
         transform.translation.x = tvecs[solution_index].at<double>(0);
-        transform.translation.y = tvecs[solution_index].at<double>(1);
-        transform.translation.z = tvecs[solution_index].at<double>(2);
-
-        cv::Mat rodrigues;
-        cv::Rodrigues(rvecs[solution_index], rodrigues);
-        tf2::Matrix3x3 rotation_matrix(
-            rodrigues.at<double>(0, 0), rodrigues.at<double>(0, 1), rodrigues.at<double>(0, 2),
-            rodrigues.at<double>(1, 0), rodrigues.at<double>(1, 1), rodrigues.at<double>(1, 2),
-            rodrigues.at<double>(2, 0), rodrigues.at<double>(2, 1), rodrigues.at<double>(2, 2)
-        );
-        tf2::Quaternion quaternion;
-        rotation_matrix.getRotation(quaternion);
-        transform.rotation.x = quaternion.getX();
-        transform.rotation.y = quaternion.getY();
-        transform.rotation.z = quaternion.getZ();
-        transform.rotation.w = quaternion.getW();
+        transform.translation.y = tvecs[solution_index].at<double>(2);
+        transform.translation.z = -tvecs[solution_index].at<double>(1);
         return 0;
     }
 

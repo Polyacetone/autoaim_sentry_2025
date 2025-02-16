@@ -86,8 +86,9 @@ void Tracker::push(const geometry_msgs::msg::Transform& transform) {
         transform.rotation.w
     );
     tf2::Matrix3x3 rotation_mat(quaternion);
-    tf2::Vector3 y_vec = rotation_mat.getColumn(1);
-    armor.angle = math::rad_period_correction(-atan(y_vec.getX() / y_vec.getY()));
+    double yaw, pitch, roll;
+    rotation_mat.getEulerYPR(yaw, pitch, roll);
+    armor.angle = yaw;
     armors_.emplace_back(armor);
 }
 
@@ -162,7 +163,7 @@ void Tracker::update() {
         }
         prev_angle = armors_[0].angle;
     }
-
+    
     armors_.clear();
     prev = now;
 }

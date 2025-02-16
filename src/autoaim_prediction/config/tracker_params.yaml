@@ -23,20 +23,20 @@ KFXYZ:
     rows: 6
     cols: 6
     dt: f
-    data: [ 1e-7,  0,  0,  0,  0,  0,
-            0,  1e-7,  0,  0,  0,  0,
-            0,  0,  1e-7,  0,  0,  0,
-            0,  0,  0,  1e-10,  0,  0,
-            0,  0,  0,  0,  1e-10,  0,
-            0,  0,  0,  0,  0,  1e-10 ]
+    data: [ 1e-6,  0,  0,  0,  0,  0,
+            0,  1e-6,  0,  0,  0,  0,
+            0,  0,  1e-6,  0,  0,  0,
+            0,  0,  0,  1e-3,  0,  0,
+            0,  0,  0,  0,  1e-3,  0,
+            0,  0,  0,  0,  0,  1e-3 ]
 
   measurement_noise_cov: !!opencv-matrix
     rows: 3
     cols: 3
     dt: f
-    data: [ 1e-4,  0,  0,
-            0,  1e-4,  0,
-            0,  0,  1e-4 ]
+    data: [ 1e-1,  0,  0,
+            0,  1e-1,  0,
+            0,  0,  1e-1 ]
 
 KFYaw:
   process_noise_cov: !!opencv-matrix

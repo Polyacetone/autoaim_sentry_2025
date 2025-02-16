@@ -187,7 +187,7 @@ void OpenVINOInferEngine::postprocess() {
 
         constexpr int colorMap[] = {COLOR::BLUE, COLOR::RED, COLOR::GRAY, COLOR::PURPLE};
         autoaim_interfaces::msg::Detection detection;
-        detection.confidence = score;
+        detection.confidence = std::min((float)score, objectScore.at<float>(0, 0));
         detection.label = tagPoint.x;
         detection.color = colorMap[colorPoint.x];
         detection.tl.x = tl_x;

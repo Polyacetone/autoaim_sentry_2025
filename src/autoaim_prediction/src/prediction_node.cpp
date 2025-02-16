@@ -142,11 +142,11 @@ void PredictionNode::get_parameters() {
     cam_to_gimbal.transform.translation.x = cam_to_gimbal_x;
     cam_to_gimbal.transform.translation.y = cam_to_gimbal_y;
     cam_to_gimbal.transform.translation.z = cam_to_gimbal_z;
-    // 这里认为相机坐标系向右是x，向下是y，向前是z。世界坐标系向右是x，向前是y，向上是z。
-    cam_to_gimbal.transform.rotation.x = -0.7071068;
+    // 相机和云台系的旋转始终固定，因为云台系实际上是物理上和相机固连的imu给的。
+    cam_to_gimbal.transform.rotation.x = 0;
     cam_to_gimbal.transform.rotation.y = 0;
     cam_to_gimbal.transform.rotation.z = 0;
-    cam_to_gimbal.transform.rotation.w = 0.7071068;
+    cam_to_gimbal.transform.rotation.w = 1;
     tf_static_broadcaster_->sendTransform(cam_to_gimbal);
 }
 
@@ -166,7 +166,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             armor_to_cam.header.frame_id = "autoaim_camera";
             armor_to_cam.child_frame_id = armor_name;
             // 计算装甲板相对于相机坐标系的位姿
-            pnp_solver_->solve_pnp(armor, armor_to_cam.transform);
+            pnp_solver_->get_translation(armor, armor_to_cam.transform);
             trisection_yaw_->get_rotation(armor, armor_to_cam.transform, gimbal_ypr);
             tf_broadcaster_->sendTransform(armor_to_cam);
             // 把装甲板的位姿转换到世界坐标系（原点为云台和小yaw转动的中心，方向为imu初始化时的方向）下进行滤波
