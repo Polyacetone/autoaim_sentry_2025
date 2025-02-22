@@ -1,11 +1,11 @@
 autoaim_prediction:
   ros__parameters:
     enable_print_state: true
-    enable_send_to_serial: false
+    enable_send_to_serial: true
     enable_debug: true
     debug_mode : false # false: Armor mode, true: Buff mode
     debug_target_color: 0 # 0: all 1: blue 2: red
-    debug_target_armor: 0
+    debug_target_armor: 4
     debug_buff_mode: 1 # 0: SMALL BUFF, 1: BIG BUFF, 2：COUNTER SMALL BUFF, 3: COUNTER BIG BUFF
     debug_bullet_speed: 30.0 # 单位: m/s
 

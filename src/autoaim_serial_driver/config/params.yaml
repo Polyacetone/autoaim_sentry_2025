@@ -1,4 +1,9 @@
 autoaim_serial_driver:
   ros__parameters:
-    imu_device_name: /dev/ttyUSB0
+    enable_hard_trigger: false
+    enable_shoot: false # 若设为false，则shoot_flag始终发0
+    imu_tty_name: /dev/ttyUSB0 # 硬触发板子
+    controller_tty_name: /dev/ttyACM0 # 下位机
     baud_rate: 115200
+
+    shoot_pos_sub_topic: /serial/shoot_pos

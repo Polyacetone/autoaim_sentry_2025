@@ -117,8 +117,8 @@ void TrisectionYaw::get_rotation(
     const float armor_yaw =
         trisection_find_min(-M_PI / 2, M_PI / 2, cost_func, FIND_ANGLE_ITERATIONS).first;
     tf2::Quaternion quaternion;
-    // setEuler旋转顺序在ros2的系（前x，左y，上z）中是绕XYZ，但在我们的相机系（右x，前y，上z）里是绕YXZ。
-    quaternion.setEuler(0, -gimbal_pitch - math::d2r(15), armor_yaw);
+    // setRPY绕固定轴旋转。旋转顺序是绕XYZ。
+    quaternion.setRPY(gimbal_pitch + math::d2r(15), 0, armor_yaw);
     transform.rotation.x = quaternion.getX();
     transform.rotation.y = quaternion.getY();
     transform.rotation.z = quaternion.getZ();

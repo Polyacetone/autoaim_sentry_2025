@@ -47,17 +47,6 @@ private:
     void detection_callback(const DetectionArray::SharedPtr msg) const;
     void camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg);
 
-    // 获取最新且不重复的变换。有些小问题，不建议使用。
-    [[deprecated]] geometry_msgs::msg::Transform
-    get_lastest_transform(const std::string& target, const std::string& source) const;
-
-    // 尝试获取指定时间点对应的变换。若尝试MAX_ATTEMPTS后仍没有找到，返回EMPTY_TRANSFORM
-    geometry_msgs::msg::Transform try_get_transform(
-        const std::string& target,
-        const std::string& source,
-        const rclcpp::Time& time_point
-    ) const;
-
     // 选择目标颜色和标签的装甲板，并按照一定规则进行排序
     void select_armors(const std::vector<Detection> src, std::vector<Detection>& dst) const;
 
@@ -151,7 +140,11 @@ void PredictionNode::get_parameters() {
 }
 
 void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) const {
-    std::tuple<float, float, float> gimbal_ypr = get_gimbal_ypr(msg->header.stamp);
+    // 查询时间设置为图像时间减3ms，是因为相机曝光、处理和传输需要一定的时间
+    // 相机曝光设置为2000时，图像时间（即msg->header.stamp）大概比串口节点发布的gimbal tf变换时间晚1.7ms (±0.3ms)
+    // 不减掉这段时间的话，tf2查询会出现错误：Lookup would require extrapolation into the future.
+    std::tuple<float, float, float> gimbal_ypr = 
+        get_gimbal_ypr(static_cast<rclcpp::Time>(msg->header.stamp) - std::chrono::microseconds(220));
     float gimbal_yaw, gimbal_pitch, gimbal_roll;
     std::tie(gimbal_yaw, gimbal_pitch, gimbal_roll) = gimbal_ypr;
     if (enable_debug_ && debug_mode_ == false) {
@@ -171,22 +164,28 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             tf_broadcaster_->sendTransform(armor_to_cam);
             // 把装甲板的位姿转换到世界坐标系（原点为云台和小yaw转动的中心，方向为imu初始化时的方向）下进行滤波
             // 尽可能降低自己车的转动对跟踪器的影响。不过由于目前似乎没有有效的精准定位手段，还不能消除平动影响
-            auto armor_to_world = try_get_transform("world", armor_name, msg->header.stamp);
-            if (armor_to_world != EMPTY_TRANSFORM) {
-                tracker_->push(armor_to_world);
-            } else {
+            try {
+                auto armor_to_world = tf_buffer_->lookupTransform(
+                    "world", 
+                    armor_name, 
+                    msg->header.stamp, 
+                    std::chrono::milliseconds(1)
+                ); // 设置1ms的timeout，因为tf发布后需要一段时间才能到tf_buffer里
+                tracker_->push(armor_to_world.transform);
+            } catch (const tf2::TransformException& ex) {
                 RCLCPP_ERROR(
                     get_logger(), 
-                    "Failed to get transform from %s to world.", 
-                    armor_name.c_str()
+                    "Failed to get transform from %s to world: %s", 
+                    armor_name.c_str(),
+                    ex.what()
                 );
             }
         }
         tracker_->update();
         if (tracker_->tracker_status != TRACKER_STATUS::LOST) {
             cv::Point3f prediction;
-            bool shoot_flag;
-            std::tie(prediction, shoot_flag) = tracker_->get_prediction(
+            bool can_shoot;
+            std::tie(prediction, can_shoot) = tracker_->get_prediction(
                 gimbal_yaw,
                 debug_bullet_speed_,
                 to_sec(now()) - to_sec(msg->header.stamp) + control_to_fire_time_
@@ -208,16 +207,17 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
                     "Pitch: %4.1f  Yaw: %4.1f (degree)    Shoot_flag: %s\n",
                     math::r2d(predicted_pitch),
                     math::r2d(predicted_yaw),
-                    (shoot_flag ? "true" : "false")
+                    (can_shoot ? "true" : "false")
                 );
             }
             if (enable_send_to_serial_ && tracker_->tracker_status != TRACKER_STATUS::TEMP_LOST) {
                 autoaim_interfaces::msg::ShootPos shoot_pos;
-                shoot_pos.header.stamp = now();
-                shoot_pos.found = true;
-                shoot_pos.shoot_flag = shoot_flag;
-                shoot_pos.pitch = math::r2d(predicted_pitch);
-                shoot_pos.yaw = math::r2d(predicted_yaw);
+                shoot_pos.header.stamp = msg->header.stamp;
+                // 发送给电控的shoot_flag中，0是不发弹，1是单发，2是连发。
+                // 一般打人用连发，打符用单发。
+                shoot_pos.shoot_flag = can_shoot ? 2 : 0; 
+                shoot_pos.pitch = predicted_pitch;
+                shoot_pos.yaw = predicted_yaw;
                 shoot_pos_pub_->publish(shoot_pos);
             }
         }
@@ -304,48 +304,13 @@ void PredictionNode::select_armors(
     center_x_prev = get_center_x(dst[0]);
 }
 
-[[deprecated]] geometry_msgs::msg::Transform
-PredictionNode::get_lastest_transform(const std::string& target, const std::string& source) const {
-    // 防止buffer没来得及更新使得找不到frame
-    while (!tf_buffer_->canTransform(target, source, tf2::TimePointZero)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    // 对每一次获取的时间戳进行记录，防止buffer没来得及更新使得找到旧的变换
-    static std::unordered_map<std::string, double> timestamp_map;
-    geometry_msgs::msg::TransformStamped tf_stamped;
-    do {
-        tf_stamped = tf_buffer_->lookupTransform(target, source, tf2::TimePointZero);
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    } while (timestamp_map[source] == to_sec(tf_stamped.header.stamp));
-    timestamp_map[source] = to_sec(tf_stamped.header.stamp);
-    return tf_stamped.transform;
-}
-
-geometry_msgs::msg::Transform PredictionNode::try_get_transform(
-    const std::string& target,
-    const std::string& source,
-    const rclcpp::Time& time_point
-) const {
-    constexpr int MAX_ATTEMPTS = 1000;
-    geometry_msgs::msg::Transform transform = EMPTY_TRANSFORM;
-    for (int i = 0; i < MAX_ATTEMPTS; i++) {
-        try {
-            transform = tf_buffer_->lookupTransform(target, source, time_point).transform;
-            break;
-        } catch (const std::exception& ex) {
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
-        }
-    }
-    return transform;
-}
-
 std::tuple<float, float, float> 
 PredictionNode::get_gimbal_ypr(const rclcpp::Time& time_point) const {
     geometry_msgs::msg::Transform transform;
     try {
         transform = tf_buffer_->lookupTransform("world", "gimbal", time_point).transform;
     } catch (const std::exception& ex) {
-        RCLCPP_ERROR(get_logger(), "Failed to get transform from gimbal to world.");
+        RCLCPP_ERROR(get_logger(), "Failed to get transform from gimbal to world: %s", ex.what());
         return std::make_tuple(0, 0, 0);
     }
     double yaw, pitch, roll;
@@ -359,8 +324,7 @@ PredictionNode::get_gimbal_ypr(const rclcpp::Time& time_point) const {
     rot_mat.getEulerYPR(yaw, pitch, roll);
     // ros2认为x向前，y向左，z向上。roll绕x轴转，pitch绕y轴转，yaw绕z轴转。
     // 我们认为x向右，y向前，z向上。roll绕y轴转，pitch绕x轴转，yaw绕z轴转。
-    // 所以roll和yaw和我们一样，但pitch是反的。
-    return std::make_tuple(yaw, -pitch, roll);
+    return std::make_tuple(yaw, roll, pitch);
 }
 } // namespace autoaim_prediction
 

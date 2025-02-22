@@ -33,6 +33,13 @@ def generate_launch_description():
                 extra_arguments=[{'use_intra_process_comms': use_intra_process_comms}]
             ),
             ComposableNode(
+                package='autoaim_serial_driver',
+                plugin='autoaim_serial_driver::SerialDriverNode',
+                name='autoaim_serial_driver',
+                parameters=[serial_params_yaml],
+                extra_arguments=[{'use_intra_process_comms': use_intra_process_comms}]
+            ),
+            ComposableNode(
                 package='autoaim_detection',
                 plugin='autoaim_detection::YoloDetectNode',
                 name='autoaim_detection',
@@ -44,13 +51,6 @@ def generate_launch_description():
                 plugin='autoaim_prediction::PredictionNode',
                 name='autoaim_prediction',
                 parameters=[prediction_params_yaml],
-                extra_arguments=[{'use_intra_process_comms': use_intra_process_comms}]
-            ),
-            ComposableNode(
-                package='autoaim_serial_driver',
-                plugin='autoaim_serial_driver::SerialDriverNode',
-                name='autoaim_serial_driver',
-                parameters=[serial_params_yaml],
                 extra_arguments=[{'use_intra_process_comms': use_intra_process_comms}]
             )
         ],
