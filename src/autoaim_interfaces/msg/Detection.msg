@@ -1,3 +1,5 @@
+# 作为DetectionArray的成员类型，从autoaim_detection发送到autoaim_prediction。
+
 int32 color
 int32 label
 float32 confidence

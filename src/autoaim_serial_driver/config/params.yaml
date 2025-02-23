@@ -6,4 +6,12 @@ autoaim_serial_driver:
     controller_tty_name: /dev/ttyACM0 # 下位机
     baud_rate: 115200
 
+    # 单位: m
+    cam_to_gimbal_x: 0.0
+    cam_to_gimbal_y: 0.06
+    cam_to_gimbal_z: 0.06
+    # 相机相对于枪口的安装误差。单位：deg
+    cam_to_gimbal_yaw: -0.007 # 若子弹击打位置偏右，可适当增加此值
+    cam_to_gimbal_pitch: -0.012 # 若子弹击打位置偏下，可适当增加此值
+
     shoot_pos_sub_topic: /serial/shoot_pos

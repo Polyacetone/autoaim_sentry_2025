@@ -2,6 +2,7 @@
 #include <tf2/convert.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2_ros/static_transform_broadcaster.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <serial_driver/serial_driver.hpp>
@@ -29,6 +30,7 @@ private:
 
     std::unique_ptr<IoContext> owned_ctx_;
     std::unique_ptr<drivers::serial_driver::SerialDriver> serial_driver_;
+    std::shared_ptr<tf2_ros::StaticTransformBroadcaster> tf_static_broadcaster_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     std::shared_ptr<rclcpp::Subscription<autoaim_interfaces::msg::ShootPos>> shoot_pos_sub_;
     std::thread receive_thread_;
@@ -42,6 +44,7 @@ SerialDriverNode::SerialDriverNode(const rclcpp::NodeOptions& options):
     owned_ctx_ = std::make_unique<IoContext>(2);
     serial_driver_ = std::make_unique<drivers::serial_driver::SerialDriver>(*owned_ctx_);
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
+    tf_static_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
     get_parameters();
     constexpr int MAX_ATTEMPTS = 5;
     for (int i = 0; i < MAX_ATTEMPTS && rclcpp::ok(); i++) {
@@ -92,6 +95,27 @@ void SerialDriverNode::get_parameters() {
         );
         serial_driver_->init_port(controller_tty_name, *device_config_);
     }
+
+    const double cam_to_gimbal_x = declare_parameter("cam_to_gimbal_x", 0.0);
+    const double cam_to_gimbal_y = declare_parameter("cam_to_gimbal_y", 0.06);
+    const double cam_to_gimbal_z = declare_parameter("cam_to_gimbal_z", 0.06);
+    const double cam_to_gimbal_yaw = declare_parameter("cam_to_gimbal_yaw", 0.0);
+    const double cam_to_gimbal_pitch = declare_parameter("cam_to_gimbal_pitch", 0.0);
+    geometry_msgs::msg::TransformStamped cam_to_gimbal;
+    cam_to_gimbal.header.stamp = this->now();
+    cam_to_gimbal.header.frame_id = "gimbal";
+    cam_to_gimbal.child_frame_id = "autoaim_camera";
+    cam_to_gimbal.transform.translation.x = cam_to_gimbal_x;
+    cam_to_gimbal.transform.translation.y = cam_to_gimbal_y;
+    cam_to_gimbal.transform.translation.z = cam_to_gimbal_z;
+    tf2::Quaternion rotation;
+    // setRPY绕固定轴旋转。旋转顺序是绕XYZ。
+    rotation.setRPY(cam_to_gimbal_pitch, 0, cam_to_gimbal_yaw);
+    cam_to_gimbal.transform.rotation.x = rotation.x();
+    cam_to_gimbal.transform.rotation.y = rotation.y();
+    cam_to_gimbal.transform.rotation.z = rotation.z();
+    cam_to_gimbal.transform.rotation.w = rotation.w();
+    tf_static_broadcaster_->sendTransform(cam_to_gimbal);
 }
 
 void SerialDriverNode::receive_hard_trigger_imu_data() {

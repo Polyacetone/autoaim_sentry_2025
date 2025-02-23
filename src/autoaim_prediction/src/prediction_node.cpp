@@ -2,7 +2,6 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_ros/transform_broadcaster.h>
-#include <tf2_ros/static_transform_broadcaster.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
@@ -11,6 +10,7 @@
 
 #include <autoaim_interfaces/msg/detection_array.hpp>
 #include <autoaim_interfaces/msg/shoot_pos.hpp>
+#include <autoaim_interfaces/msg/decision_info.hpp>
 
 #include <pnp_solver.hpp>
 #include <trisection_yaw.hpp>
@@ -20,6 +20,7 @@
 namespace autoaim_prediction {
 using autoaim_interfaces::msg::Detection;
 using autoaim_interfaces::msg::DetectionArray;
+using autoaim_interfaces::msg::DecisionInfo;
 
 const geometry_msgs::msg::Transform EMPTY_TRANSFORM;
 
@@ -45,6 +46,7 @@ public:
 private:
     void get_parameters();
     void detection_callback(const DetectionArray::SharedPtr msg) const;
+    void decision_callback(const DecisionInfo::SharedPtr msg);
     void camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg);
 
     // 选择目标颜色和标签的装甲板，并按照一定规则进行排序
@@ -56,6 +58,7 @@ private:
 
     bool enable_print_state_;
     bool enable_send_to_serial_;
+
     bool enable_debug_;
     bool debug_mode_;
     int debug_target_color_;
@@ -64,13 +67,17 @@ private:
     float debug_bullet_speed_;
     float control_to_fire_time_;
 
-    std::shared_ptr<tf2_ros::StaticTransformBroadcaster> tf_static_broadcaster_;
+    int target_color_;
+    int target_armor_;
+    float bullet_speed_;
+
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
 
     std::shared_ptr<rclcpp::Subscription<DetectionArray>> detection_sub_;
     std::shared_ptr<rclcpp::Subscription<sensor_msgs::msg::CameraInfo>> camera_info_sub_;
+    std::shared_ptr<rclcpp::Subscription<DecisionInfo>> decision_info_sub_;
     std::shared_ptr<rclcpp::Publisher<autoaim_interfaces::msg::ShootPos>> shoot_pos_pub_;
 
     std::shared_ptr<PnPSolver> pnp_solver_;
@@ -80,7 +87,6 @@ private:
 
 PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
     Node("autoaim_prediction", options) {
-    tf_static_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -108,6 +114,7 @@ void PredictionNode::get_parameters() {
     
     std::string camera_info_topic = declare_parameter("camera_info_topic", "/camera/color/camera_info");
     std::string detection_sub_topic = declare_parameter("detection_sub_topic", "/detection");
+    std::string decision_info_sub_topic = declare_parameter("decision_info_sub_topic", "/decision");
     std::string shoot_pos_pub_topic = declare_parameter("shoot_pos_pub_topic", "/serial/shoot_pos");
     camera_info_sub_ = create_subscription<sensor_msgs::msg::CameraInfo>(
         camera_info_topic,
@@ -119,24 +126,12 @@ void PredictionNode::get_parameters() {
         10,
         [&](const DetectionArray::SharedPtr msg) { detection_callback(msg); }
     );
+    decision_info_sub_ = create_subscription<DecisionInfo>(
+        decision_info_sub_topic,
+        10,
+        [&](const DecisionInfo::SharedPtr msg) { decision_callback(msg); }
+    );
     shoot_pos_pub_ = create_publisher<autoaim_interfaces::msg::ShootPos>(shoot_pos_pub_topic, 10);
-
-    const double cam_to_gimbal_x = declare_parameter("cam_to_gimbal_x", 0.0);
-    const double cam_to_gimbal_y = declare_parameter("cam_to_gimbal_y", 0.0658);
-    const double cam_to_gimbal_z = declare_parameter("cam_to_gimbal_z", 0.0639);
-    geometry_msgs::msg::TransformStamped cam_to_gimbal;
-    cam_to_gimbal.header.stamp = this->now();
-    cam_to_gimbal.header.frame_id = "gimbal";
-    cam_to_gimbal.child_frame_id = "autoaim_camera";
-    cam_to_gimbal.transform.translation.x = cam_to_gimbal_x;
-    cam_to_gimbal.transform.translation.y = cam_to_gimbal_y;
-    cam_to_gimbal.transform.translation.z = cam_to_gimbal_z;
-    // 相机和云台系的旋转始终固定，因为云台系实际上是物理上和相机固连的imu给的。
-    cam_to_gimbal.transform.rotation.x = 0;
-    cam_to_gimbal.transform.rotation.y = 0;
-    cam_to_gimbal.transform.rotation.z = 0;
-    cam_to_gimbal.transform.rotation.w = 1;
-    tf_static_broadcaster_->sendTransform(cam_to_gimbal);
 }
 
 void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) const {
@@ -222,6 +217,12 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             }
         }
     }
+}
+
+void PredictionNode::decision_callback(const DecisionInfo::SharedPtr msg) {
+    target_color_ = msg->color;
+    target_armor_ = msg->label;
+    bullet_speed_ = msg->bullet_speed;
 }
 
 void PredictionNode::camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg) {

@@ -2,20 +2,16 @@ autoaim_prediction:
   ros__parameters:
     enable_print_state: true
     enable_send_to_serial: true
-    enable_debug: true
+    enable_debug: true # 在debug模式下，击打下面选项指定的敌人，不接收决策发送的decision_info话题
     debug_mode : false # false: Armor mode, true: Buff mode
     debug_target_color: 0 # 0: all 1: blue 2: red
     debug_target_armor: 4
     debug_buff_mode: 1 # 0: SMALL BUFF, 1: BIG BUFF, 2：COUNTER SMALL BUFF, 3: COUNTER BIG BUFF
     debug_bullet_speed: 30.0 # 单位: m/s
 
-    # 单位: m
-    cam_to_gimbal_x: 0.0
-    cam_to_gimbal_y: 0.09
-    cam_to_gimbal_z: 0.09
-
-    control_to_fire_time: 0.098 # 单位: s
+    control_to_fire_time: 0.03 # 单位: s
 
     camera_info_topic: "/camera/color/camera_info"
     detection_sub_topic: "/detection"
+    decision_info_sub_topic: "/decision"
     shoot_pos_pub_topic: "/serial/shoot_pos"
