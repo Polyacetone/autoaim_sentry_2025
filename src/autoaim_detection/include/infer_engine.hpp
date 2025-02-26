@@ -12,7 +12,7 @@ public:
     virtual void postprocess() = 0;
 
     virtual void set_input_image(const cv::Mat img) = 0;
-    virtual std::vector<autoaim_interfaces::msg::Detection> get_detection_vector() const = 0;
+    virtual std::vector<autoaim_interfaces::msg::Detection> get_detection_arr() const = 0;
 
     virtual cv::Mat debug_draw_armors() = 0;
 };
