@@ -1,0 +1,2 @@
+uint16  current_hp
+bool power_management_shooter_output

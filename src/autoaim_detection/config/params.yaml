@@ -1,16 +1,11 @@
 autoaim_detection:
   ros__parameters:
     image_topic: "/camera/color/image_raw"
-    camera_info_topic: "/camera/color/camera_info"
     detection_topic: "/detection"
     image_detected_topic: "/debug/detected_image"
-    enemy_info_topic: "/decision/cloud_left"
 
-    onnx_name: "20230528.onnx"
-    num_colors: 4
-    num_tags: 9
-    confidence_threshold: 0.5
-    nms_threshold: 0.4
+    onnx_name: "20250223withnms.onnx"
+    confidence_threshold: 0.1
 
     enable_detected_image: true
     enable_fps: false

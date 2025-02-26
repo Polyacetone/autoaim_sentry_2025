@@ -17,7 +17,7 @@ public:
         get_parameters();
 
         RCLCPP_INFO(this->get_logger(), "初始化YOLO...");
-        Config config = {confidence_threshold_, nms_threshold_, num_colors_, num_tags_, onnx_path_};
+        Config config = {onnx_path_, confidence_threshold_};
         infer_engine_ = create_infer_engine(config);
         RCLCPP_INFO(this->get_logger(), "初始化YOLO完成");
         // subscribe to image topic
@@ -35,19 +35,12 @@ public:
 
 private:
     std::string img_topic_;
-    std::string cam_info_topic_;
-    std::string enemy_info_topic_;
     std::string detection_topic_;
     std::string img_detected_topic_;
     std::string onnx_path_;
     bool enable_detected_image_;
     bool enable_fps_;
-    int num_colors_;
-    int num_tags_;
-    int num_balance_;
     float confidence_threshold_;
-    float nms_threshold_;
-    int target_color_;
 
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr img_sub_;
     rclcpp::Publisher<autoaim_interfaces::msg::DetectionArray>::SharedPtr detection_pub_;
@@ -57,20 +50,14 @@ private:
 
     void get_parameters() {
         img_topic_ = declare_parameter<std::string>("image_topic", "/camera/image_raw");
-        cam_info_topic_ =
-            declare_parameter<std::string>("camera_info_topic", "/camera/camera_info");
         detection_topic_ = declare_parameter<std::string>("detection_topic", "/detection");
-        enemy_info_topic_ = declare_parameter<std::string>("enemy_info_topic", "/enemy_info");
         img_detected_topic_ =
             declare_parameter<std::string>("image_detected_topic", "/camera/color/image_detection");
         onnx_path_ = ament_index_cpp::get_package_share_directory("autoaim_detection") + "/model/"
             + declare_parameter<std::string>("onnx_name", "NULL");
         enable_detected_image_ = declare_parameter<bool>("enable_detected_image", false);
         enable_fps_ = declare_parameter<bool>("enable_fps", false);
-        num_colors_ = declare_parameter<int>("num_colors", 2);
-        num_tags_ = declare_parameter<int>("num_tags", 6);
         confidence_threshold_ = declare_parameter<float>("confidence_threshold", 0.5);
-        nms_threshold_ = declare_parameter<float>("nms_threshold", 0.5);
     }
 
     void img_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
@@ -83,9 +70,12 @@ private:
 
         infer_engine_->set_input_image(img);
         infer_engine_->preprocess();
+        // auto prev = std::chrono::high_resolution_clock::now();
         infer_engine_->infer();
+        // auto next = std::chrono::high_resolution_clock::now();
+        // std::cout << (next - prev).count() / 1e6 << std::endl;
         infer_engine_->postprocess();
-        auto detection_vec = infer_engine_->get_detection_vector();
+        auto detection_vec = infer_engine_->get_detection_arr();
 
         autoaim_interfaces::msg::DetectionArray detection_array;
         detection_array.detections = detection_vec;
