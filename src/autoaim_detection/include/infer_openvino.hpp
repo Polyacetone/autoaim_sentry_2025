@@ -57,7 +57,8 @@ OpenVINOInferEngine::OpenVINOInferEngine(Config config) {
     ppp.input().model().set_layout("NCHW");
     ppp.output().tensor().set_element_type(ov::element::f32);
     model = ppp.build();
-    compiled_model = core.compile_model(model, "GPU", {ov::hint::inference_precision(ov::element::f16)});
+    compiled_model =
+        core.compile_model(model, "GPU", {ov::hint::inference_precision(ov::element::f16)});
     infer_request = compiled_model.create_infer_request();
     input_image_height = compiled_model.input().get_shape()[1];
     input_image_width = compiled_model.input().get_shape()[2];
@@ -137,7 +138,7 @@ void OpenVINOInferEngine::postprocess() {
 
     cv::dnn::NMSBoxes(boxes, confidences, conf_threshold, nms_threshold, indices);
     detection_arr.clear();
-    for(const auto index: indices) {
+    for (const auto index: indices) {
         detection_arr.emplace_back(detections_before_nms[index]);
     }
 }
