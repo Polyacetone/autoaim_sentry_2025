@@ -20,7 +20,7 @@ class Tracker {
 public:
     Tracker(const std::string& params_path);
     void push(const geometry_msgs::msg::Transform& transform);
-    void update();
+    void update(const double time_stamp);
     void debug_print_state();
 
     /*!
@@ -92,11 +92,10 @@ void Tracker::push(const geometry_msgs::msg::Transform& transform) {
     armors_.emplace_back(armor);
 }
 
-void Tracker::update() {
+void Tracker::update(const double time_stamp) {
     using TS = TRACKER_STATUS;
-    static std::chrono::steady_clock::time_point prev;
-    auto now = std::chrono::steady_clock::now();
-    float time_elapsed = (now - prev).count() / 1e9; // 和上一帧比经过的时间
+    static double prev = time_stamp;
+    const float time_elapsed = static_cast<float>(time_stamp - prev); // 和上一帧比经过的时间
 
     if (armors_.empty() || armors_.size() > 2) {
         tracking_frames_ = 0;
@@ -120,8 +119,8 @@ void Tracker::update() {
             kf_xyz_->initialize(armors_[0].center);
             kf_yaw_->initialize(armors_[0].angle);
             const cv::Point2f car_center(
-                armors_[0].center.x - INITIAL_RADIUS * sin(armors_[0].angle),
-                armors_[0].center.y + INITIAL_RADIUS * cos(armors_[0].angle)
+                armors_[0].center.x + INITIAL_RADIUS * cos(armors_[0].angle),
+                armors_[0].center.y + INITIAL_RADIUS * sin(armors_[0].angle)
             );
             ukf_->initialize(car_center);
             observing_armor_id_ = 0;
@@ -144,15 +143,14 @@ void Tracker::update() {
                 observing_armor_id_ %= 4;
                 yaw_ -= M_PI / 2;
                 kf_xyz_->force_change_position(armors_[0].center);
-            } else { // 没有切换装甲板
-                kf_xyz_->update(armors_[0].center);
             }
+            kf_xyz_->update(armors_[0].center);
             kf_yaw_->update(yaw_);
             update_radius();
             update_height();
             const cv::Point2f car_center(
-                armors_[0].center.x - radius_[observing_armor_id_ % 2] * sin(armors_[0].angle),
-                armors_[0].center.y + radius_[observing_armor_id_ % 2] * cos(armors_[0].angle)
+                armors_[0].center.x + radius_[observing_armor_id_ % 2] * cos(armors_[0].angle),
+                armors_[0].center.y + radius_[observing_armor_id_ % 2] * sin(armors_[0].angle)
             );
             ukf_->update(car_center);
         }
@@ -165,7 +163,7 @@ void Tracker::update() {
     }
     
     armors_.clear();
-    prev = now;
+    prev = time_stamp;
 }
 
 std::tuple<cv::Point3f, bool> Tracker::get_prediction(
@@ -173,7 +171,7 @@ std::tuple<cv::Point3f, bool> Tracker::get_prediction(
     const float bullet_speed, 
     const float img_to_fire_time
 ) {
-    if (abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD) { // 平动，只用KFXYZ预测
+    if (false && abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD) { // 平动，只用KFXYZ预测
         // 理论上来说要精确求出这里的击打时间需要解一个方程，这里为了简化直接采用一阶近似
         // img_to_hit_time = img_to_fire_time + fire_to_hit_time
         const float img_to_hit_time = img_to_fire_time
@@ -185,7 +183,7 @@ std::tuple<cv::Point3f, bool> Tracker::get_prediction(
         // img_to_hit_time = img_to_fire_time + fire_to_hit_time
         const float img_to_hit_time = img_to_fire_time
             + math::get_distance(ukf_->position + img_to_fire_time * ukf_->velocity) / bullet_speed;
-        const cv::Point2f pred_pos = ukf_->position + ukf_->velocity * img_to_hit_time;
+        const cv::Point2f pred_center = ukf_->position + ukf_->velocity * img_to_hit_time;
         // 0号装甲板在世界系下的预测yaw角
         const float pred_yaw_to_world = kf_yaw_->yaw + kf_yaw_->palstance * img_to_hit_time;
         // 0号装甲板在gimbal系下的预测yaw角
@@ -204,8 +202,8 @@ std::tuple<cv::Point3f, bool> Tracker::get_prediction(
         const float target_angle_to_world = 
             math::rad_period_correction(target_angle_to_gimbal + gimbal_yaw);
         const cv::Point3f prediction = cv::Point3f(
-            pred_pos.x + sin(target_angle_to_world) * radius_[target_armor_index],
-            pred_pos.y - cos(target_angle_to_world) * radius_[target_armor_index],
+            pred_center.x - cos(target_angle_to_world) * radius_[target_armor_index],
+            pred_center.y - sin(target_angle_to_world) * radius_[target_armor_index],
             height_[target_armor_index]
         );
         const bool shoot_flag = abs(target_angle_to_gimbal) < ANTITOP_CAN_SHOOT_ANGLE;
@@ -216,11 +214,11 @@ std::tuple<cv::Point3f, bool> Tracker::get_prediction(
 void Tracker::update_radius() {
     if (armors_.size() == 2) {
         const int index = observing_armor_id_ % 2;
-        const float delta_x = armors_[0].center.x - armors_[1].center.x;
-        const float delta_y = armors_[0].center.y - armors_[1].center.y;
+        const float delta_x = armors_[1].center.x - armors_[0].center.x;
+        const float delta_y = armors_[1].center.y - armors_[0].center.y;
         const float theta = armors_[0].angle;
-        const float r_first = abs(delta_x * sin(theta) - delta_y * cos(theta));
-        const float r_next = abs(delta_x * cos(theta) + delta_y * sin(theta));
+        const float r_first = abs(delta_x * cos(theta) + delta_y * sin(theta));
+        const float r_next = abs(-delta_x * sin(theta) + delta_y * cos(theta));
         if (MIN_RADIUS <= r_first && r_first <= MAX_RADIUS) {
             radius_[index] = CLOSE_RADIUS_FILTER_RATIO * radius_[index]
                 + (1 - CLOSE_RADIUS_FILTER_RATIO) * r_first;

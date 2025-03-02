@@ -7,10 +7,10 @@ Tracker:
   initial_radius: 0.26
   initial_height: -0.1
   min_radius: 0.2 # 用于更新惯性滤波的半径最小值
-  max_radius: 0.6 # 用于更新惯性滤波的半径最大值 ##### 注意：0.6是为了适应贼大的靶车，实际上场应较小（0.35左右） #####
+  max_radius: 0.35 # 用于更新惯性滤波的半径最大值
   switch_armor_angle: 1.0472 # 角度突变的阈值，用于判断小陀螺跟踪的装甲板是否切换。这里是60度对应的弧度
-  close_radius_filter_ratio: 0.93 # 较近的装甲板对应半径的惯性滤波系数
-  far_radius_filter_ratio: 0.98 # 较远的装甲板对应半径的惯性滤波系数
+  close_radius_filter_ratio: 0.95 # 较近的装甲板对应半径的惯性滤波系数
+  far_radius_filter_ratio: 0.99 # 较远的装甲板对应半径的惯性滤波系数
   close_height_filter_ratio: 0.6 # 较近的装甲板对应高度的惯性滤波系数
   far_height_filter_ratio: 0.8 # 较远的装甲板对应高度的惯性滤波系数
   antitop_palstance_threshold: 1.74533 # 启用反陀螺的角速度阈值。1.74533rad/s = 100deg/s
@@ -23,19 +23,19 @@ KFXYZ:
     rows: 6
     cols: 6
     dt: f
-    data: [ 5e-1,  0,  0,  0,  0,  0,
-            0,  5e-1,  0,  0,  0,  0,
-            0,  0,  5e-1,  0,  0,  0,
-            0,  0,  0,  3e-0,  0,  0,
-            0,  0,  0,  0,  3e-0,  0,
-            0,  0,  0,  0,  0,  3e-0 ]
+    data: [ 5e-2,  0,  0,  0,  0,  0,
+            0,  5e-2,  0,  0,  0,  0,
+            0,  0,  1e-0,  0,  0,  0,
+            0,  0,  0,  2e-0,  0,  0,
+            0,  0,  0,  0,  2e-0,  0,
+            0,  0,  0,  0,  0,  1e-1 ]
 
   measurement_noise_cov: !!opencv-matrix
     rows: 3
     cols: 3
     dt: f
-    data: [ 1e-2,  0,  0,
-            0,  1e-2,  0,
+    data: [ 3e-5,  0,  0,
+            0,  3e-5,  0,
             0,  0,  1e-2 ]
 
 KFYaw:
@@ -43,8 +43,8 @@ KFYaw:
     rows: 2
     cols: 2
     dt: f
-    data: [ 1e-4,  0, 
-            0,  1e-2 ]
+    data: [ 1e-5,  0, 
+            0,  1e-3 ]
 
   measurement_noise_cov: !!opencv-matrix
     rows: 1
@@ -57,14 +57,14 @@ UKFXY:
     rows: 4
     cols: 4
     dt: f
-    data: [ 1e-1,  0,  0,  0,
-            0,  1e-1,  0,  0,
-            0,  0,  5e-1,  0,
-            0,  0,  0,  5e-1 ]
+    data: [ 1e-4,  0,  0,  0,
+            0,  1e-4,  0,  0,
+            0,  0,  1e-5,  0,
+            0,  0,  0,  1e-5 ]
 
   measurement_noise_cov: !!opencv-matrix
     rows: 2
     cols: 2
     dt: f
-    data: [ 5e-1,  0,
-            0,  5e-1 ]
+    data: [ 1e-3,  0,
+            0,  1e-3 ]

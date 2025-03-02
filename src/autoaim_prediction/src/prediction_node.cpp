@@ -18,9 +18,9 @@
 #include <trajectory.hpp>
 
 namespace autoaim_prediction {
+using autoaim_interfaces::msg::DecisionInfo;
 using autoaim_interfaces::msg::Detection;
 using autoaim_interfaces::msg::DetectionArray;
-using autoaim_interfaces::msg::DecisionInfo;
 
 const geometry_msgs::msg::Transform EMPTY_TRANSFORM;
 
@@ -30,7 +30,7 @@ double to_sec(builtin_interfaces::msg::Time t) {
 
 std::string get_tf_armor_name(int color, int label, int index) {
     std::string name;
-    char color_map[3] = {'G', 'B', 'R'}; // gray, blue, red
+    char color_map[3] = {'B', 'R', 'G'}; // blue, red, gray
     name += color_map[color];
     name += static_cast<char>(label + '0');
     name += '-';
@@ -52,24 +52,20 @@ private:
     // 选择目标颜色和标签的装甲板，并按照一定规则进行排序
     void select_armors(const std::vector<Detection> src, std::vector<Detection>& dst) const;
 
-    // 获取指定时间的自己云台的yaw, pitch, roll（相对于世界坐标系）。
+    // 获取指定时间的自己云台的yaw, pitch, roll（相对于chassis）。
     // 之所以是ypr不是rpy，是因为我们采用的旋转顺序是yaw, pitch, roll。
     std::tuple<float, float, float> get_gimbal_ypr(const rclcpp::Time& time_point) const;
 
     bool enable_print_state_;
     bool enable_send_to_serial_;
 
-    bool enable_debug_;
-    bool debug_mode_;
-    int debug_target_color_;
-    int debug_target_armor_;
-    int debug_buff_mode_;
-    float debug_bullet_speed_;
-    float control_to_fire_time_;
-
     int target_color_;
     int target_armor_;
     float bullet_speed_;
+
+    float control_to_fire_time_;
+    float shoot_compensate_pitch_;
+    float shoot_compensate_yaw_;
 
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -104,15 +100,15 @@ PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
 void PredictionNode::get_parameters() {
     enable_print_state_ = declare_parameter("enable_print_state", false);
     enable_send_to_serial_ = declare_parameter("enable_send_to_serial", true);
-    enable_debug_ = declare_parameter("enable_debug", false);
-    debug_mode_ = declare_parameter("debug_mode", false);
-    debug_target_color_ = declare_parameter("debug_target_color", 0);
-    debug_target_armor_ = declare_parameter("debug_target_armor", 1);
-    debug_buff_mode_ = declare_parameter("debug_buff_mode", 1);
-    debug_bullet_speed_ = declare_parameter("debug_bullet_speed", 30.0);
+    target_color_ = declare_parameter("target_color", 0);
+    target_armor_ = declare_parameter("target_armor", 1);
+    bullet_speed_ = declare_parameter("bullet_speed", 30.0);
     control_to_fire_time_ = declare_parameter("control_to_fire_time", 0.098);
-    
-    std::string camera_info_topic = declare_parameter("camera_info_topic", "/camera/color/camera_info");
+    shoot_compensate_pitch_ = declare_parameter("shoot_compensate_pitch", 0.0);
+    shoot_compensate_yaw_ = declare_parameter("shoot_compensate_yaw", 0.0);
+
+    std::string camera_info_topic =
+        declare_parameter("camera_info_topic", "/camera/color/camera_info");
     std::string detection_sub_topic = declare_parameter("detection_sub_topic", "/detection");
     std::string decision_info_sub_topic = declare_parameter("decision_info_sub_topic", "/decision");
     std::string shoot_pos_pub_topic = declare_parameter("shoot_pos_pub_topic", "/serial/shoot_pos");
@@ -135,86 +131,116 @@ void PredictionNode::get_parameters() {
 }
 
 void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) const {
-    // 查询时间设置为图像时间减3ms，是因为相机曝光、处理和传输需要一定的时间
+    // 查询时间设置为图像时间减一定时间，是因为相机曝光、处理和传输有延迟
     // 相机曝光设置为2000时，图像时间（即msg->header.stamp）大概比串口节点发布的gimbal tf变换时间晚1.7ms (±0.3ms)
     // 不减掉这段时间的话，tf2查询会出现错误：Lookup would require extrapolation into the future.
-    std::tuple<float, float, float> gimbal_ypr = 
-        get_gimbal_ypr(static_cast<rclcpp::Time>(msg->header.stamp) - std::chrono::microseconds(220));
+    std::tuple<float, float, float> gimbal_ypr = get_gimbal_ypr(
+        static_cast<rclcpp::Time>(msg->header.stamp) - std::chrono::microseconds(220)
+    );
     float gimbal_yaw, gimbal_pitch, gimbal_roll;
     std::tie(gimbal_yaw, gimbal_pitch, gimbal_roll) = gimbal_ypr;
-    if (enable_debug_ && debug_mode_ == false) {
-        std::vector<Detection> target_armors;
-        select_armors(msg->detections, target_armors);
-        const int len = target_armors.size();
-        for (int i = 0; i < len; i++) {
-            const Detection& armor = target_armors[i];
-            const std::string armor_name = get_tf_armor_name(armor.color, armor.label, i);
-            geometry_msgs::msg::TransformStamped armor_to_cam;
-            armor_to_cam.header.stamp = msg->header.stamp;
-            armor_to_cam.header.frame_id = "autoaim_camera";
-            armor_to_cam.child_frame_id = armor_name;
-            // 计算装甲板相对于相机坐标系的位姿
-            pnp_solver_->get_translation(armor, armor_to_cam.transform);
-            trisection_yaw_->get_rotation(armor, armor_to_cam.transform, gimbal_ypr);
-            tf_broadcaster_->sendTransform(armor_to_cam);
-            // 把装甲板的位姿转换到世界坐标系（原点为云台和小yaw转动的中心，方向为imu初始化时的方向）下进行滤波
-            // 尽可能降低自己车的转动对跟踪器的影响。不过由于目前似乎没有有效的精准定位手段，还不能消除平动影响
-            try {
-                auto armor_to_world = tf_buffer_->lookupTransform(
-                    "world", 
-                    armor_name, 
-                    msg->header.stamp, 
-                    std::chrono::milliseconds(1)
-                ); // 设置1ms的timeout，因为tf发布后需要一段时间才能到tf_buffer里
-                tracker_->push(armor_to_world.transform);
-            } catch (const tf2::TransformException& ex) {
-                RCLCPP_ERROR(
-                    get_logger(), 
-                    "Failed to get transform from %s to world: %s", 
-                    armor_name.c_str(),
-                    ex.what()
-                );
-            }
+    std::vector<Detection> target_armors;
+    select_armors(msg->detections, target_armors);
+    const int len = target_armors.size();
+    for (int i = 0; i < len; i++) {
+        const Detection& armor = target_armors[i];
+        const std::string armor_name = get_tf_armor_name(armor.color, armor.label, i);
+        geometry_msgs::msg::TransformStamped armor_to_cam;
+        armor_to_cam.header.stamp = msg->header.stamp;
+        armor_to_cam.header.frame_id = "autoaim_camera";
+        armor_to_cam.child_frame_id = armor_name;
+        // 计算装甲板相对于相机坐标系的位姿
+        pnp_solver_->get_translation(armor, armor_to_cam.transform);
+        trisection_yaw_->get_rotation(armor, armor_to_cam.transform, gimbal_ypr);
+        tf_broadcaster_->sendTransform(armor_to_cam);
+        // 把装甲板的位姿转换到世界坐标系下进行滤波
+        try {
+            auto armor_to_chassis = tf_buffer_->lookupTransform(
+                "chassis",
+                armor_name,
+                msg->header.stamp,
+                std::chrono::milliseconds(1)
+            ); // 设置1ms的timeout，因为tf发布后需要一段时间才能到tf_buffer里
+            tracker_->push(armor_to_chassis.transform);
+        } catch (const tf2::TransformException& ex) {
+            RCLCPP_ERROR(
+                get_logger(),
+                "Failed to get transform from %s to chassis: %s",
+                armor_name.c_str(),
+                ex.what()
+            );
         }
-        tracker_->update();
-        if (tracker_->tracker_status != TRACKER_STATUS::LOST) {
-            cv::Point3f prediction;
-            bool can_shoot;
-            std::tie(prediction, can_shoot) = tracker_->get_prediction(
-                gimbal_yaw,
-                debug_bullet_speed_,
-                to_sec(now()) - to_sec(msg->header.stamp) + control_to_fire_time_
-                // img_to_fire_time = img_to_control_time + control_to_fire_time
-            );
-            // 目前弹道计算直接在世界坐标系下进行。虽然和摩擦轮有一定差距，不过感觉影响不大？
-            const float predicted_pitch = trajectory::calc_pitch(
-                prediction.x,
-                prediction.y,
-                prediction.z,
-                debug_bullet_speed_
-            );
-            const float predicted_yaw =
-                math::rad_period_correction(atan2(prediction.y, prediction.x) - M_PI / 2);
+    }
+    tracker_->update(to_sec(msg->header.stamp));
+    if (tracker_->tracker_status != TRACKER_STATUS::LOST) {
+        cv::Point3f prediction;
+        bool can_shoot;
+        std::tie(prediction, can_shoot) = tracker_->get_prediction(
+            gimbal_yaw,
+            bullet_speed_,
+            to_sec(now()) - to_sec(msg->header.stamp) + control_to_fire_time_
+            // img_to_fire_time = img_to_control_time + control_to_fire_time
+        );
 
-            if (enable_print_state_) {
-                tracker_->debug_print_state();
-                std::printf(
-                    "Pitch: %4.1f  Yaw: %4.1f (degree)    Shoot_flag: %s\n",
-                    math::r2d(predicted_pitch),
-                    math::r2d(predicted_yaw),
-                    (can_shoot ? "true" : "false")
-                );
-            }
-            if (enable_send_to_serial_ && tracker_->tracker_status != TRACKER_STATUS::TEMP_LOST) {
-                autoaim_interfaces::msg::ShootPos shoot_pos;
-                shoot_pos.header.stamp = msg->header.stamp;
-                // 发送给电控的shoot_flag中，0是不发弹，1是单发，2是连发。
-                // 一般打人用连发，打符用单发。
-                shoot_pos.shoot_flag = can_shoot ? 2 : 0; 
-                shoot_pos.pitch = predicted_pitch;
-                shoot_pos.yaw = predicted_yaw;
-                shoot_pos_pub_->publish(shoot_pos);
-            }
+        geometry_msgs::msg::TransformStamped prediction_to_chassis;
+        prediction_to_chassis.header.stamp = msg->header.stamp;
+        prediction_to_chassis.header.frame_id = "chassis";
+        prediction_to_chassis.child_frame_id = "prediction";
+        prediction_to_chassis.transform.translation.x = prediction.x;
+        prediction_to_chassis.transform.translation.y = prediction.y;
+        prediction_to_chassis.transform.translation.z = prediction.z;
+        tf_broadcaster_->sendTransform(prediction_to_chassis);
+
+        geometry_msgs::msg::TransformStamped prediction_to_fric;
+        try {
+            // fake_fric是原点在摩擦轮系，但方向和大yaw相同的系。解出来的角度方便控车
+            prediction_to_fric = tf_buffer_->lookupTransform(
+                "fake_fric",
+                "prediction",
+                msg->header.stamp,
+                std::chrono::milliseconds(1)
+            );
+        } catch (const tf2::TransformException& ex) {
+            RCLCPP_ERROR(
+                get_logger(),
+                "Failed to get transform from prediction to fake_fric: %s",
+                ex.what()
+            );
+            return;
+        }
+
+        // 注意：发给电控的pitch是向上转为正。但我们在之前的计算中都是向下转为正（因为符合右手定则）。
+        const float predicted_pitch = trajectory::calc_pitch(
+            prediction_to_fric.transform.translation.x,
+            prediction_to_fric.transform.translation.y,
+            prediction_to_fric.transform.translation.z,
+            bullet_speed_
+        ) + math::d2r(shoot_compensate_pitch_);
+        const float predicted_yaw = math::rad_period_correction(
+            atan2(
+                prediction_to_fric.transform.translation.y,
+                prediction_to_fric.transform.translation.x
+            )
+        ) + math::d2r(shoot_compensate_yaw_);
+        
+        if (enable_print_state_) {
+            tracker_->debug_print_state();
+            std::printf(
+                "Pitch: %4.1f  Yaw: %4.1f (degree)    Shoot_flag: %s\n",
+                math::r2d(predicted_pitch),
+                math::r2d(predicted_yaw),
+                (can_shoot ? "true" : "false")
+            );
+        }
+        if (enable_send_to_serial_ && tracker_->tracker_status != TRACKER_STATUS::TEMP_LOST) {
+            autoaim_interfaces::msg::ShootPos shoot_pos;
+            shoot_pos.header.stamp = msg->header.stamp;
+            // 发送给电控的shoot_flag中，0是不发弹，1是单发，2是连发。
+            // 一般打人用连发，打符用单发。
+            shoot_pos.shoot_flag = can_shoot ? 2 : 0;
+            shoot_pos.pitch = predicted_pitch;
+            shoot_pos.yaw = predicted_yaw;
+            shoot_pos_pub_->publish(shoot_pos);
         }
     }
 }
@@ -239,10 +265,7 @@ void PredictionNode::camera_info_callback(const sensor_msgs::msg::CameraInfo::Sh
     camera_info_sub_ = nullptr;
 }
 
-void PredictionNode::select_armors(
-    const std::vector<Detection> src, 
-    std::vector<Detection>& dst
-) const {
+void PredictionNode::select_armors(const std::vector<Detection> src, std::vector<Detection>& dst) const {
     constexpr auto get_center_x = [](const Detection& d) -> int {
         return (d.bl.x + d.br.x + d.tr.x + d.tl.x) / 4;
     };
@@ -254,21 +277,17 @@ void PredictionNode::select_armors(
     std::vector<Detection> filtered;
     // 筛选出目标颜色和标签的装甲板
     for (const auto& armor: src) {
-        if (enable_debug_) {
-            if (armor.label == debug_target_armor_) {
-                if (debug_target_color_ == 0 || debug_target_color_ == armor.color) {
+        if (armor.label == target_armor_) {
+            if (target_color_ == armor.color) {
+                filtered.emplace_back(armor);
+            } else if (armor.color == 2) { // 特殊处理灰色装甲板
+                if (abs(get_center_x(armor) - center_x_prev) <= 15) {
+                    // 这里只根据灰色装甲板位置与上次瞄的位置差判断是否是被打成灰的
+                    // 理论上需要累计计数判断是被打死了还是暂时灰色
+                    // 不过哨兵决策应该会确保自瞄不会对着死人爽打，所以这块不写了
                     filtered.emplace_back(armor);
-                } else if (armor.color == 0) { // 特殊处理灰色装甲板
-                    if (abs(get_center_x(armor) - center_x_prev) <= 15) {
-                        // 这里只根据灰色装甲板位置与上次瞄的位置差判断是否是被打成灰的
-                        // 理论上需要累计计数判断是被打死了还是暂时灰色
-                        // 不过哨兵决策应该会确保自瞄不会对着死人爽打，所以这块不写了
-                        filtered.emplace_back(armor);
-                    }
                 }
             }
-        } else {
-            // TODO
         }
     }
     if (filtered.empty()) {
@@ -305,27 +324,27 @@ void PredictionNode::select_armors(
     center_x_prev = get_center_x(dst[0]);
 }
 
-std::tuple<float, float, float> 
-PredictionNode::get_gimbal_ypr(const rclcpp::Time& time_point) const {
+std::tuple<float, float, float> PredictionNode::get_gimbal_ypr(const rclcpp::Time& time_point) const {
     geometry_msgs::msg::Transform transform;
     try {
-        transform = tf_buffer_->lookupTransform("world", "gimbal", time_point).transform;
+        transform = tf_buffer_->lookupTransform("chassis", "gimbal_pitch", time_point).transform;
     } catch (const std::exception& ex) {
-        RCLCPP_ERROR(get_logger(), "Failed to get transform from gimbal to world: %s", ex.what());
+        RCLCPP_ERROR(get_logger(),
+            "Failed to get transform from gimbal_pitch to chasis: %s",
+            ex.what()
+        );
         return std::make_tuple(0, 0, 0);
     }
     double yaw, pitch, roll;
     tf2::Quaternion quat(
-        transform.rotation.x, 
-        transform.rotation.y, 
-        transform.rotation.z, 
+        transform.rotation.x,
+        transform.rotation.y,
+        transform.rotation.z,
         transform.rotation.w
     );
     tf2::Matrix3x3 rot_mat(quat);
     rot_mat.getEulerYPR(yaw, pitch, roll);
-    // ros2认为x向前，y向左，z向上。roll绕x轴转，pitch绕y轴转，yaw绕z轴转。
-    // 我们认为x向右，y向前，z向上。roll绕y轴转，pitch绕x轴转，yaw绕z轴转。
-    return std::make_tuple(yaw, roll, pitch);
+    return std::make_tuple(yaw, pitch, roll);
 }
 } // namespace autoaim_prediction
 

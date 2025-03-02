@@ -4,7 +4,7 @@ autoaim_detection:
     detection_topic: "/detection"
     image_detected_topic: "/debug/detected_image"
 
-    onnx_name: "20250226.onnx"
+    onnx_name: "20250227v12.onnx"
     confidence_threshold: 0.4
     nms_threshold: 0.4
 

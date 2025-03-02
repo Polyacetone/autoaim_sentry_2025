@@ -10,129 +10,138 @@
 
 class KFXYZ {
 public:
-    KFXYZ(const std::string& params_path) {
+    KFXYZ(const std::string& params_path): x_(6), P_(6, 6), F_(6, 6), Q_(6, 6), R_(3, 3), H_(3, 6) {
         load_params(params_path);
-        cvkf_xyz_.transitionMatrix = (cv::Mat_<float>(6, 6) <<
-            1, 0, 0, 1, 0, 0,
-            0, 1, 0, 0, 1, 0,
-            0, 0, 1, 0, 0, 1,
-            0, 0, 0, 1, 0, 0,
-            0, 0, 0, 0, 1, 0,
-            0, 0, 0, 0, 0, 1
-        );
         initialize(cv::Point3f(0, 0, 0));
     }
 
     void initialize(const cv::Point3f& meas) {
-        cvkf_xyz_.statePost.at<float>(0) = meas.x;
-        cvkf_xyz_.statePost.at<float>(1) = meas.y;
-        cvkf_xyz_.statePost.at<float>(2) = meas.z;
-        cvkf_xyz_.statePost.at<float>(3) = 0;
-        cvkf_xyz_.statePost.at<float>(4) = 0;
-        cvkf_xyz_.statePost.at<float>(5) = 0;
-        cv::setIdentity(cvkf_xyz_.measurementMatrix);
-        cv::setIdentity(cvkf_xyz_.errorCovPost, cv::Scalar::all(1.0));
+        x_ << meas.x, meas.y, meas.z, 0, 0, 0;
+        P_.setIdentity();
+        P_ *= 1.0;
+        H_ << 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0;
     }
 
     void update(const cv::Point3f& meas) {
-        cv::Mat estimated = 
-            cvkf_xyz_.correct((cv::Mat_<float>(3, 1) << meas.x, meas.y, meas.z));
-        position.x = estimated.at<float>(0);
-        position.y = estimated.at<float>(1);
-        position.z = estimated.at<float>(2);
-        velocity.x = estimated.at<float>(3);
-        velocity.y = estimated.at<float>(4);
-        velocity.z = estimated.at<float>(5);
+        Eigen::VectorXf z(3);
+        z << meas.x, meas.y, meas.z;
+        Eigen::VectorXf y = z - H_ * x_;
+        Eigen::MatrixXf S = H_ * P_ * H_.transpose() + R_;
+        Eigen::MatrixXf K = P_ * H_.transpose() * S.inverse();
+        x_ += K * y;
+        P_ = (Eigen::MatrixXf::Identity(6, 6) - K * H_) * P_;
+        update_output();
     }
 
-    void predict(const float time_elapsed) {
-        update_transition_mat(time_elapsed);
-        cv::Mat predicted = cvkf_xyz_.predict();
-        position.x = predicted.at<float>(0);
-        position.y = predicted.at<float>(1);
-        position.z = predicted.at<float>(2);
+    void predict(float delta_t) {
+        F_.setIdentity();
+        F_(0, 3) = delta_t;
+        F_(1, 4) = delta_t;
+        F_(2, 5) = delta_t;
+        x_ = F_ * x_;
+        P_ = F_ * P_ * F_.transpose() + Q_;
+        update_output();
     }
 
     // 强制更新状态量中的位置信息
     void force_change_position(const cv::Point3f& meas) {
-        cvkf_xyz_.statePost.at<float>(0) = meas.x;
-        cvkf_xyz_.statePost.at<float>(1) = meas.y;
-        cvkf_xyz_.statePost.at<float>(2) = meas.z;
+        x_(0) = meas.x;
+        x_(1) = meas.y;
+        x_(2) = meas.z;
+        update_output();
     }
 
     cv::Point3f position, velocity;
 
 private:
-    cv::KalmanFilter cvkf_xyz_ = cv::KalmanFilter(6, 3, 0, CV_32F);
+    Eigen::VectorXf x_;
+    Eigen::MatrixXf P_, F_, Q_, R_;
+    Eigen::MatrixXf H_;
 
-    void update_transition_mat(const float time_elapsed) {
-        cvkf_xyz_.transitionMatrix.at<float>(0, 3) = time_elapsed;
-        cvkf_xyz_.transitionMatrix.at<float>(1, 4) = time_elapsed;
-        cvkf_xyz_.transitionMatrix.at<float>(2, 5) = time_elapsed;
+    void update_output() {
+        position.x = x_(0);
+        position.y = x_(1);
+        position.z = x_(2);
+        velocity.x = x_(3);
+        velocity.y = x_(4);
+        velocity.z = x_(5);
     }
 
     void load_params(const std::string& params_path) {
         cv::FileStorage fs(params_path, cv::FileStorage::READ);
-        fs["KFXYZ"]["process_noise_cov"] >> cvkf_xyz_.processNoiseCov;
-        fs["KFXYZ"]["measurement_noise_cov"] >> cvkf_xyz_.measurementNoiseCov;
+        cv::Mat Q_cv, R_cv;
+        fs["KFXYZ"]["process_noise_cov"] >> Q_cv;
+        fs["KFXYZ"]["measurement_noise_cov"] >> R_cv;
+        cv::cv2eigen(Q_cv, Q_);
+        cv::cv2eigen(R_cv, R_);
         fs.release();
     }
 };
 
 class KFYaw {
 public:
-    KFYaw(const std::string& params_path) {
+    KFYaw(const std::string& params_path): x_(2), P_(2, 2), F_(2, 2), Q_(2, 2), R_(1, 1), H_(1, 2) {
         load_params(params_path);
-        cvkf_theta_.transitionMatrix = (cv::Mat_<float>(2, 2) <<
-            1, 1,
-            0, 1
-        );
         initialize(0);
     }
 
     void initialize(const float meas) {
-        cvkf_theta_.statePost.at<float>(0) = meas;
-        cvkf_theta_.statePost.at<float>(1) = 0;
-        cv::setIdentity(cvkf_theta_.measurementMatrix);
-        cv::setIdentity(cvkf_theta_.errorCovPost, cv::Scalar::all(1.0));
+        x_ << meas, 0.0;
+        P_.setIdentity();
+        P_ *= 1.0;
+        H_ << 1.0, 0.0;
+        update_output();
     }
 
     void update(const float meas) {
-        cv::Mat estimated = cvkf_theta_.correct((cv::Mat_<float>(1, 1) << meas));
-        yaw = estimated.at<float>(0);
-        palstance = estimated.at<float>(1);
+        Eigen::VectorXf z(1);
+        z << meas;
+        Eigen::VectorXf y = z - H_ * x_;
+        Eigen::MatrixXf S = H_ * P_ * H_.transpose() + R_;
+        Eigen::MatrixXf K = P_ * H_.transpose() * S.inverse();
+        x_ += K * y;
+        Eigen::MatrixXf I = Eigen::MatrixXf::Identity(2, 2);
+        P_ = (I - K * H_) * P_;
+        update_output();
     }
 
     void predict(const float time_elapsed) {
-        update_transition_mat(time_elapsed);
-        cv::Mat predicted = cvkf_theta_.predict();
-        yaw = predicted.at<float>(0);
+        F_.setIdentity();
+        F_(0, 1) = time_elapsed;
+        x_ = F_ * x_;
+        P_ = F_ * P_ * F_.transpose() + Q_;
+        update_output();
     }
 
     float yaw, palstance;
 
 private:
-    cv::KalmanFilter cvkf_theta_ = cv::KalmanFilter(2, 1, 0, CV_32F);
+    Eigen::VectorXf x_; // 状态量 [yaw, palstance]
+    Eigen::MatrixXf P_; // 误差协方差矩阵
+    Eigen::MatrixXf F_; // 状态转移矩阵
+    Eigen::MatrixXf Q_; // 过程噪声协方差
+    Eigen::MatrixXf R_; // 测量噪声协方差
+    Eigen::MatrixXf H_; // 观测矩阵
 
-    void update_transition_mat(const float time_elapsed) {
-        cvkf_theta_.transitionMatrix.at<float>(0, 1) = time_elapsed;
+    void update_output() {
+        yaw = x_(0);
+        palstance = x_(1);
     }
 
     void load_params(const std::string& params_path) {
         cv::FileStorage fs(params_path, cv::FileStorage::READ);
-        fs["KFYaw"]["process_noise_cov"] >> cvkf_theta_.processNoiseCov;
-        fs["KFYaw"]["measurement_noise_cov"] >> cvkf_theta_.measurementNoiseCov;
+        cv::Mat Q_cv, R_cv;
+        fs["KFYaw"]["process_noise_cov"] >> Q_cv;
+        fs["KFYaw"]["measurement_noise_cov"] >> R_cv;
+        cv::cv2eigen(Q_cv, Q_);
+        cv::cv2eigen(R_cv, R_);
         fs.release();
     }
 };
 
 class UKFXY {
 public:
-    UKFXY(const std::string& params_path):
-        lambda(3 - state_dim),
-        alpha(1e-3),
-        beta(2),
-        kappa(0) {
+    UKFXY(const std::string& params_path): lambda(3 - state_dim), alpha(1e-1), beta(2), kappa(0) {
         load_params(params_path);
         initialize(cv::Point2f(0, 0));
     }
@@ -166,7 +175,7 @@ public:
             Eigen::VectorXf diff = sigma_points.col(i) - x;
             P += weights_cov(i) * diff * diff.transpose();
         }
-        
+
         set_output_result();
     }
 

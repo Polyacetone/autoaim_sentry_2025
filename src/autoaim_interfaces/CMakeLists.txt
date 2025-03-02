@@ -16,18 +16,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/DetectionArray.msg"
   "msg/ShootPos.msg"
   "msg/DecisionInfo.msg"
-
-  "msg/ChassisStatus.msg"
-  "msg/rfr/CompRobotsHp.msg"
-  "msg/rfr/CompStatus.msg"
-  "msg/rfr/InterMapClientToRobot.msg"
-  "msg/rfr/RobotGroundPos.msg"
-  "msg/rfr/RobotPerformance.msg"
-  "msg/rfr/RobotPos.msg"
-  "msg/rfr/RobotResource.msg"
-  "msg/rfr/RobotRfid.msg"
-  "msg/rfr/RobotSentryDecision.msg"
-  "msg/rfr/TeamEvent.msg"
   
   DEPENDENCIES
     std_msgs

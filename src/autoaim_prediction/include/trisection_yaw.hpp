@@ -22,7 +22,7 @@ public:
         @param detection yolo识别结果，需要知道装甲板的2D角点坐标，和装甲板标签（用于判断装甲板大小）。
         @param transform 需要从这里读取pnp得到的装甲板中心点坐标（相机系下），并向这里写入计算得到的旋转（装甲板系相对于相机系）。
         @param gimbal_rpy 自己云台相对于世界系的roll, pitch, yaw。用于估计装甲板相对于云台（gimbal）系的pitch，以降自由度。
-        @note 相机坐标系、装甲板坐标系和云台系方向都是是正常的（向右是x，向前是y，向上是z）。
+        @note 相机坐标系、装甲板坐标系和云台系方向都是是正常的（向前是x，向左是y，向上是z）。
     */
     void get_rotation(
         const autoaim_interfaces::msg::Detection& detection,
@@ -49,7 +49,8 @@ private:
         @param armor_label 装甲板的标签。用于判断装甲板大小。
         @param armor_pitch 装甲板在gimbal系下的pitch角，是已知的（因为云台相对于世界的pitch和装甲板相对于世界的pitch均已知）。
         @param armor_yaw 装甲板在gimbal系下的yaw角，作为未知量由三分法传入。
-        @note yaw角定义为装甲板向心方向法向量的水平投影与正前方水平投影的夹角，范围-pi/2~pi/2，逆时针为正。
+        @note yaw角定义为装甲板向心方向法向量的水平投影与正前方水平投影的夹角，范围-pi/2~pi/2，逆时针为正，符合绕z旋转的右手定则。
+        pitch角向下为正，符合绕y旋转的右手定则。
     */
     std::vector<cv::Point3f> spin_armor_3d(
         const cv::Point3f& armor_center, 
@@ -60,7 +61,7 @@ private:
 
     /*!
         @brief 将3d点投影到2d。
-        @note 输入object_pts基于我们（在tf2中发布的）的相机系（向右x，向前y，向上z）。
+        @note 输入object_pts基于我们（在tf2中发布的）的相机系（向前x，向左y，向上z）。
     */
     std::vector<cv::Point2f> project_3d_to_2d(const std::vector<cv::Point3f>& object_pts) const;
 
@@ -110,15 +111,16 @@ void TrisectionYaw::get_rotation(
     };
     std::function cost_func = [&](float yaw) -> float {
         std::vector<cv::Point3f> spinned_armor_pts =
-            spin_armor_3d(armor_center, detection.label, gimbal_pitch + math::d2r(15), yaw);
+            spin_armor_3d(armor_center, detection.label, math::d2r(15) - gimbal_pitch, yaw);
         std::vector<cv::Point2f> spinned_armor_pts_2d = project_3d_to_2d(spinned_armor_pts);
-        return get_pts_cost(image_pts, spinned_armor_pts_2d, M_PI / 4);
+        return get_pts_cost(image_pts, spinned_armor_pts_2d, M_PI / 12);
     };
     const float armor_yaw =
         trisection_find_min(-M_PI / 2, M_PI / 2, cost_func, FIND_ANGLE_ITERATIONS).first;
     tf2::Quaternion quaternion;
     // setRPY绕固定轴旋转。旋转顺序是绕XYZ。
-    quaternion.setRPY(gimbal_pitch + math::d2r(15), 0, armor_yaw);
+    // 这里写入的旋转是相对于相机系。
+    quaternion.setRPY(0, math::d2r(15) - gimbal_pitch, armor_yaw);
     transform.rotation.x = quaternion.getX();
     transform.rotation.y = quaternion.getY();
     transform.rotation.z = quaternion.getZ();
@@ -166,19 +168,19 @@ std::vector<cv::Point3f> TrisectionYaw::spin_armor_3d(
     const float armor_yaw
 ) const {
     const float WIDTH = (armor_label == 1) ? BIG_WIDTH : SMALL_WIDTH;
-    // 长度为装甲板宽度的一半，方向向右（x轴正方向）
-    const cv::Point3f width_vec = cv::Point3f(cos(armor_yaw), sin(armor_yaw), 0) * (WIDTH / 2);
-    // 长度为装甲板高度的一半，方向向上（z轴正方向）
+    // 长度为装甲板宽度的一半，方向向左（装甲板系y轴正方向）
+    const cv::Point3f width_vec = cv::Point3f(-sin(armor_yaw), cos(armor_yaw), 0) * (WIDTH / 2);
+    // 长度为装甲板高度的一半，方向向上（装甲板系z轴正方向）
     const cv::Point3f height_vec = cv::Point3f(
-        -sin(armor_pitch) * sin(armor_yaw),
         sin(armor_pitch) * cos(armor_yaw),
+        sin(armor_pitch) * sin(armor_yaw),
         cos(armor_pitch)
     ) * (HEIGHT / 2);
     const std::vector<cv::Point3f> corners {
-        armor_center - width_vec + height_vec,
-        armor_center - width_vec - height_vec,
+        armor_center + width_vec + height_vec,
         armor_center + width_vec - height_vec,
-        armor_center + width_vec + height_vec
+        armor_center - width_vec - height_vec,
+        armor_center - width_vec + height_vec
     };
     return corners;
 }
@@ -186,11 +188,11 @@ std::vector<cv::Point3f> TrisectionYaw::spin_armor_3d(
 std::vector<cv::Point2f> 
 TrisectionYaw::project_3d_to_2d(const std::vector<cv::Point3f>& object_pts) const {
     // opencv认为的相机系是向右x，向下y，向前z。
-    // 我们（在tf2中发布的）的相机系是向右x，向前y，向上z。
-    // 这里要把我们相机系中的点(x, y, z)对应到opencv的相机系中(x, -z, y)，然后才能用cv::projectPoints
+    // 我们的相机系是前x，向左y，向上z。
+    // 这里要把我们相机系中的点(-y, -z, x)对应到opencv的相机系中(x, y, z)，然后才能用cv::projectPoints
     std::vector<cv::Point3f> object_pts_cv;
     for (const auto& object_pt: object_pts) {
-        object_pts_cv.emplace_back(cv::Point3f(object_pt.x, -object_pt.z, object_pt.y));
+        object_pts_cv.emplace_back(cv::Point3f(-object_pt.y, -object_pt.z, object_pt.x));
     }
     std::vector<cv::Point2f> image_pts;
     // opencv的相机坐标系到图像平面的投影中，rvec和tvec都是0。
