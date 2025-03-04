@@ -17,7 +17,7 @@ public:
         get_parameters();
 
         RCLCPP_INFO(this->get_logger(), "初始化YOLO...");
-        Config config = {onnx_path_, confidence_threshold_, nms_threshold_};
+        Config config = {model_path_, confidence_threshold_, nms_threshold_};
         infer_engine_ = create_infer_engine(config);
         RCLCPP_INFO(this->get_logger(), "初始化YOLO完成");
         // subscribe to image topic
@@ -37,7 +37,7 @@ private:
     std::string img_topic_;
     std::string detection_topic_;
     std::string img_detected_topic_;
-    std::string onnx_path_;
+    std::string model_path_;
     bool enable_detected_image_;
     bool enable_fps_;
     float confidence_threshold_;
@@ -54,8 +54,8 @@ private:
         detection_topic_ = declare_parameter<std::string>("detection_topic", "/detection");
         img_detected_topic_ =
             declare_parameter<std::string>("image_detected_topic", "/camera/color/image_detection");
-        onnx_path_ = ament_index_cpp::get_package_share_directory("autoaim_detection") + "/model/"
-            + declare_parameter<std::string>("onnx_name", "NULL");
+        model_path_ = ament_index_cpp::get_package_share_directory("autoaim_detection") + "/model/"
+            + declare_parameter<std::string>("model_path", "NULL");
         enable_detected_image_ = declare_parameter<bool>("enable_detected_image", false);
         enable_fps_ = declare_parameter<bool>("enable_fps", false);
         confidence_threshold_ = declare_parameter<float>("confidence_threshold", 0.5);

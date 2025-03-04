@@ -11,12 +11,14 @@ set(INFER_BACKEND_OPENVINO ON)  # use openvino
 set(INFER_BACKEND_CUDA OFF) # use cuda
 ### </infer backend settings>
 
+find_package(OpenMP REQUIRED)
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
 ament_auto_add_library(${PROJECT_NAME} SHARED src/detection_node.cpp)
 target_include_directories(${PROJECT_NAME} PUBLIC include ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBS})
+target_link_libraries(${PROJECT_NAME} OpenMP::OpenMP_CXX)
 
 if(INFER_BACKEND_OPENVINO)
   add_definitions(-DINFER_BACKEND_OPENVINO)

@@ -1,3 +1,4 @@
+#include <omp.h>
 #include <opencv2/opencv.hpp>
 #include <openvino/openvino.hpp>
 #include "rclcpp/rclcpp.hpp"
@@ -7,7 +8,7 @@
 #include <check_armor.hpp>
 
 struct Config {
-    std::string onnx_path;
+    std::string model_path;
     float conf_threshold;
     float nms_threshold;
 };
@@ -25,7 +26,7 @@ public:
     cv::Mat debug_draw_armors() override;
 
 private:
-    std::string onnx_path;
+    std::string model_path;
     float conf_threshold;
     float nms_threshold;
     int input_image_width;
@@ -39,10 +40,10 @@ private:
 OpenVINOInferEngine::OpenVINOInferEngine(Config config) {
     conf_threshold = config.conf_threshold;
     nms_threshold = config.nms_threshold;
-    onnx_path = config.onnx_path;
+    model_path = config.model_path;
 
     ov::Core core;
-    std::shared_ptr<ov::Model> model = core.read_model(onnx_path);
+    std::shared_ptr<ov::Model> model = core.read_model(model_path);
     ov::preprocess::PrePostProcessor ppp = ov::preprocess::PrePostProcessor(model);
     ppp.input()
         .tensor()
@@ -58,7 +59,11 @@ OpenVINOInferEngine::OpenVINOInferEngine(Config config) {
     ppp.output().tensor().set_element_type(ov::element::f32);
     model = ppp.build();
     compiled_model =
-        core.compile_model(model, "GPU", {ov::hint::inference_precision(ov::element::f16)});
+        core.compile_model(model, "GPU", {
+            ov::hint::inference_precision(ov::element::f16), 
+            ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY)
+        }
+    );
     infer_request = compiled_model.create_infer_request();
     input_image_height = compiled_model.input().get_shape()[1];
     input_image_width = compiled_model.input().get_shape()[2];
@@ -91,55 +96,96 @@ void OpenVINOInferEngine::postprocess() {
     const ov::Shape output_shape = output_tensor.get_shape();
     const int out_rows = output_shape[1];
     const int out_cols = output_shape[2];
-    if (out_cols != 36) {
-        std::cerr << "Error in postprocess: output columns != 36" << std::endl;
+    if (out_cols != 23) {
+        std::cerr << "Error in postprocess: output columns != 23" << std::endl;
         return;
     }
     const cv::Mat output_mat(out_rows, out_cols, CV_32F, output_tensor.data<float>());
-    std::vector<autoaim_interfaces::msg::Detection> detections_before_nms;
-    std::vector<cv::Rect> boxes;
-    std::vector<float> confidences;
-    std::vector<int> indices;
-    for (int i = 0; i < out_rows; i++) {
-        // 输出向量格式：x1, y1, x2, y2, 24个类别的confidence, 8个key_pts.xy
-        const cv::Mat row = output_mat.row(i).colRange(0, 36);
+    using Point = geometry_msgs::msg::Point32;
+    using DetectionOutput = std::tuple<int, int, Point, Point, Point, Point>; // color, label, key_points
+    std::vector<cv::Rect> color_boxes, label_boxes;
+    std::vector<float> color_confidences, label_confidences;
+    std::vector<DetectionOutput> color_detections, label_detections;
 
-        const cv::Mat scores = row.colRange(4, 28);
-        double max_score;
-        cv::Point max_point;
-        cv::minMaxLoc(scores, nullptr, &max_score, nullptr, &max_point);
-        const float confidence = static_cast<float>(max_score);
-        const int class_id = max_point.x;
-        if (confidence < conf_threshold) {
+    #pragma omp parallel for num_threads(4)
+    for (int i = 0; i < out_rows; i++) {
+        // 输出向量格式：x1, y1, x2, y2, 3个颜色(b,r,g)的置信度分数, 8个类别的置信度分数, 8个key_pts.xy
+        const cv::Mat row = output_mat.row(i).colRange(0, 23);
+
+        const cv::Mat color_scores = row.colRange(4, 7);
+        const cv::Mat label_scores = row.colRange(7, 15);
+        double max_color_score, max_label_score;
+        cv::Point max_color_point, max_label_point;
+        cv::minMaxLoc(color_scores, nullptr, &max_color_score, nullptr, &max_color_point);
+        cv::minMaxLoc(label_scores, nullptr, &max_label_score, nullptr, &max_label_point);
+        if (max_color_score < conf_threshold && max_label_score < conf_threshold) {
             continue;
         }
-        confidences.emplace_back(confidence);
 
         const float box_x = row.at<float>(0, 0);
         const float box_y = row.at<float>(0, 1);
         const float box_w = row.at<float>(0, 2);
         const float box_h = row.at<float>(0, 3);
-        boxes.emplace_back(cv::Rect(box_x, box_y, box_w, box_h));
+        DetectionOutput detection;
+        std::get<0>(detection) = max_color_point.x;
+        std::get<1>(detection) = max_label_point.x;
+        std::get<2>(detection).x = row.at<float>(0, 15);
+        std::get<2>(detection).y = row.at<float>(0, 16);
+        std::get<3>(detection).x = row.at<float>(0, 17);
+        std::get<3>(detection).y = row.at<float>(0, 18);
+        std::get<4>(detection).x = row.at<float>(0, 19);
+        std::get<4>(detection).y = row.at<float>(0, 20);
+        std::get<5>(detection).x = row.at<float>(0, 21);
+        std::get<5>(detection).y = row.at<float>(0, 22);
 
-        autoaim_interfaces::msg::Detection detection;
-        detection.confidence = confidence;
-        detection.color = class_id % 3; // blue, red, gray
-        detection.label = class_id / 3; // S, 1, 2, 3, 4, outpost, basesmall, basebig
-        detection.tl.x = row.at<float>(0, 28);
-        detection.tl.y = row.at<float>(0, 29);
-        detection.bl.x = row.at<float>(0, 30);
-        detection.bl.y = row.at<float>(0, 31);
-        detection.br.x = row.at<float>(0, 32);
-        detection.br.y = row.at<float>(0, 33);
-        detection.tr.x = row.at<float>(0, 34);
-        detection.tr.y = row.at<float>(0, 35);
-        detections_before_nms.emplace_back(detection);
+        #pragma omp critical
+        if (max_color_score > max_label_score) { // 是一个颜色框
+            color_boxes.emplace_back(cv::Rect(box_x, box_y, box_w, box_h));
+            color_confidences.emplace_back(max_color_score);
+            color_detections.emplace_back(detection);
+        } else { // 是一个类别框
+            label_boxes.emplace_back(cv::Rect(box_x, box_y, box_w, box_h));
+            label_confidences.emplace_back(max_label_score);
+            label_detections.emplace_back(detection);
+        }
     }
 
-    cv::dnn::NMSBoxes(boxes, confidences, conf_threshold, nms_threshold, indices);
+    std::vector<int> color_indices, label_indices;
+    cv::dnn::NMSBoxes(color_boxes, color_confidences, conf_threshold, nms_threshold, color_indices);
+    cv::dnn::NMSBoxes(label_boxes, label_confidences, conf_threshold, nms_threshold, label_indices);
+
+    constexpr auto distance_squred = [](const Point& a, const Point& b) -> float {
+        return (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y);
+    };
+    constexpr auto middle_point = [](const Point& a, const Point& b) -> Point {
+        Point p;
+        p.x = (a.x + b.x) / 2;
+        p.y = (a.y + b.y) / 2;
+        return p;
+    };
     detection_arr.clear();
-    for (const auto index: indices) {
-        detection_arr.emplace_back(detections_before_nms[index]);
+    for (const int color_index: color_indices) {
+        for (const int label_index: label_indices) {
+            const float difference = distance_squred(
+                std::get<2>(color_detections[color_index]),
+                std::get<2>(label_detections[label_index])
+            ) + distance_squred(
+                std::get<4>(color_detections[color_index]),
+                std::get<4>(label_detections[label_index])
+            );
+            if (difference < 20) {
+                autoaim_interfaces::msg::Detection detection;
+                detection.color = std::get<0>(color_detections[color_index]);
+                detection.label = std::get<1>(label_detections[label_index]);
+                detection.confidence = std::min(color_confidences[color_index], label_confidences[label_index]);
+                detection.tl = middle_point(std::get<2>(color_detections[color_index]), std::get<2>(label_detections[label_index]));
+                detection.bl = middle_point(std::get<3>(color_detections[color_index]), std::get<3>(label_detections[label_index]));
+                detection.br = middle_point(std::get<4>(color_detections[color_index]), std::get<4>(label_detections[label_index]));
+                detection.tr = middle_point(std::get<5>(color_detections[color_index]), std::get<5>(label_detections[label_index]));
+                detection_arr.emplace_back(detection);
+                break;
+            }
+        }
     }
 }
 
