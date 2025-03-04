@@ -96,8 +96,9 @@ void CameraNode::get_parameters() {
     } else {
         RCLCPP_ERROR(this->get_logger(), "Invalid camera info URL: %s", camera_info_url.c_str());
     }
-    camera_pub_ =
-        image_transport::create_camera_publisher(this, img_pub_topic_, rmw_qos_profile_default);
+    rmw_qos_profile_t custom_qos = rmw_qos_profile_sensor_data;
+    custom_qos.depth = 1;
+    camera_pub_ = image_transport::create_camera_publisher(this, img_pub_topic_, custom_qos);
 }
 
 void CameraNode::capture_thread() {

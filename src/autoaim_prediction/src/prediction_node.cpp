@@ -114,20 +114,23 @@ void PredictionNode::get_parameters() {
     std::string shoot_pos_pub_topic = declare_parameter("shoot_pos_pub_topic", "/serial/shoot_pos");
     camera_info_sub_ = create_subscription<sensor_msgs::msg::CameraInfo>(
         camera_info_topic,
-        10,
+        rclcpp::SensorDataQoS().keep_last(1),
         [&](const sensor_msgs::msg::CameraInfo::SharedPtr msg) { camera_info_callback(msg); }
     );
     detection_sub_ = create_subscription<DetectionArray>(
         detection_sub_topic,
-        10,
+        rclcpp::SensorDataQoS().keep_last(1),
         [&](const DetectionArray::SharedPtr msg) { detection_callback(msg); }
     );
     decision_info_sub_ = create_subscription<DecisionInfo>(
         decision_info_sub_topic,
-        10,
+        rclcpp::SensorDataQoS().keep_last(1),
         [&](const DecisionInfo::SharedPtr msg) { decision_callback(msg); }
     );
-    shoot_pos_pub_ = create_publisher<autoaim_interfaces::msg::ShootPos>(shoot_pos_pub_topic, 10);
+    shoot_pos_pub_ = create_publisher<autoaim_interfaces::msg::ShootPos>(
+        shoot_pos_pub_topic, 
+        rclcpp::SensorDataQoS().keep_last(1)
+    );
 }
 
 void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) const {

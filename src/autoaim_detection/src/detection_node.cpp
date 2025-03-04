@@ -23,14 +23,18 @@ public:
         // subscribe to image topic
         img_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
             img_topic_,
-            10,
+            rclcpp::SensorDataQoS().keep_last(1),
             std::bind(&YoloDetectNode::img_callback, this, std::placeholders::_1)
         );
         // pub
-        detection_pub_ =
-            this->create_publisher<autoaim_interfaces::msg::DetectionArray>(detection_topic_, 10);
-        img_detected_pub_ =
-            this->create_publisher<sensor_msgs::msg::Image>(img_detected_topic_, 10);
+        detection_pub_ = this->create_publisher<autoaim_interfaces::msg::DetectionArray>(
+            detection_topic_,
+            rclcpp::SensorDataQoS().keep_last(1)
+        );
+        img_detected_pub_ = this->create_publisher<sensor_msgs::msg::Image>(
+            img_detected_topic_,
+            rclcpp::SensorDataQoS().keep_last(1)
+        );
     }
 
 private:
