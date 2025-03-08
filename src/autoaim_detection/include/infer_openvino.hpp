@@ -3,7 +3,7 @@
 #include <openvino/openvino.hpp>
 #include "rclcpp/rclcpp.hpp"
 #include "cv_bridge/cv_bridge.h"
-#include <autoaim_interfaces/msg/detection_array.hpp>
+#include <hw_sentry_interfaces/msg/detection_array.hpp>
 
 #include <check_armor.hpp>
 
@@ -22,7 +22,7 @@ public:
     void infer() override;
     void postprocess() override;
     void set_input_image(const cv::Mat image) override;
-    std::vector<autoaim_interfaces::msg::Detection> get_detection_arr() const override;
+    std::vector<hw_sentry_interfaces::msg::Detection> get_detection_arr() const override;
     cv::Mat debug_draw_armors() override;
 
 private:
@@ -34,7 +34,7 @@ private:
     cv::Mat image;
     ov::InferRequest infer_request;
     ov::CompiledModel compiled_model;
-    std::vector<autoaim_interfaces::msg::Detection> detection_arr;
+    std::vector<hw_sentry_interfaces::msg::Detection> detection_arr;
 };
 
 OpenVINOInferEngine::OpenVINOInferEngine(Config config) {
@@ -174,7 +174,7 @@ void OpenVINOInferEngine::postprocess() {
                 std::get<4>(label_detections[label_index])
             );
             if (difference < 20) {
-                autoaim_interfaces::msg::Detection detection;
+                hw_sentry_interfaces::msg::Detection detection;
                 detection.color = std::get<0>(color_detections[color_index]);
                 detection.label = std::get<1>(label_detections[label_index]);
                 detection.confidence = std::min(color_confidences[color_index], label_confidences[label_index]);
@@ -193,7 +193,7 @@ void OpenVINOInferEngine::set_input_image(const cv::Mat image) {
     this->image = image;
 }
 
-std::vector<autoaim_interfaces::msg::Detection> OpenVINOInferEngine::get_detection_arr() const {
+std::vector<hw_sentry_interfaces::msg::Detection> OpenVINOInferEngine::get_detection_arr() const {
     return detection_arr;
 }
 

@@ -5,7 +5,7 @@
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <opencv2/opencv.hpp>
 
-#include <autoaim_interfaces/msg/detection.hpp>
+#include <hw_sentry_interfaces/msg/detection.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 
 class PnPSolver {
@@ -18,7 +18,7 @@ public:
         @note 相机坐标系和装甲板坐标系方向都是向前x，向左y，向上z。
     */
     bool get_translation(
-        const autoaim_interfaces::msg::Detection& detection,
+        const hw_sentry_interfaces::msg::Detection& detection,
         geometry_msgs::msg::Transform& transform
     ) const {
         const auto& world_points = detection.label == 1 ? BIG_POINTS : SMALL_POINTS;

@@ -1,6 +1,6 @@
 #include <infer_engine.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
-#include <autoaim_interfaces/msg/detection_array.hpp>
+#include <hw_sentry_interfaces/msg/detection_array.hpp>
 
 namespace autoaim_detection {
 float get_fps() {
@@ -27,13 +27,13 @@ public:
             std::bind(&YoloDetectNode::img_callback, this, std::placeholders::_1)
         );
         // pub
-        detection_pub_ = this->create_publisher<autoaim_interfaces::msg::DetectionArray>(
+        detection_pub_ = this->create_publisher<hw_sentry_interfaces::msg::DetectionArray>(
             detection_topic_,
             rclcpp::SensorDataQoS().keep_last(1)
         );
         img_detected_pub_ = this->create_publisher<sensor_msgs::msg::Image>(
             img_detected_topic_,
-            rclcpp::SensorDataQoS().keep_last(1)
+            10
         );
     }
 
@@ -48,7 +48,7 @@ private:
     float nms_threshold_;
 
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr img_sub_;
-    rclcpp::Publisher<autoaim_interfaces::msg::DetectionArray>::SharedPtr detection_pub_;
+    rclcpp::Publisher<hw_sentry_interfaces::msg::DetectionArray>::SharedPtr detection_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_detected_pub_;
 
     std::unique_ptr<InferEngine> infer_engine_;
@@ -80,7 +80,7 @@ private:
         infer_engine_->postprocess();
         auto detection_vec = infer_engine_->get_detection_arr();
 
-        autoaim_interfaces::msg::DetectionArray detection_array;
+        hw_sentry_interfaces::msg::DetectionArray detection_array;
         detection_array.detections = detection_vec;
         detection_array.header = msg->header;
         detection_pub_->publish(detection_array);

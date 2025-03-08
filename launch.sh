@@ -1,2 +1,2 @@
 . install/setup.bash
-ros2 launch launcher launcher.py
+ros2 launch autoaim_launcher autoaim_launcher.py

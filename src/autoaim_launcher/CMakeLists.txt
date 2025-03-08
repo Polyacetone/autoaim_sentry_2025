@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(launcher)
+project(autoaim_launcher)
 
 find_package(ament_cmake_auto REQUIRED)
 

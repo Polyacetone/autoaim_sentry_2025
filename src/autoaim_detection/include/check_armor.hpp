@@ -1,9 +1,9 @@
 // 过滤几何形状不符合条件的装甲板
 
-#include <autoaim_interfaces/msg/detection.hpp>
+#include <hw_sentry_interfaces/msg/detection.hpp>
 
 namespace check_armor {
-using Detection = autoaim_interfaces::msg::Detection;
+using Detection = hw_sentry_interfaces::msg::Detection;
 using Point32 = geometry_msgs::msg::Point32;
 
 // 检查装甲板几何形状是否符合条件

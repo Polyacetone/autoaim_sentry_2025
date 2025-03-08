@@ -4,7 +4,7 @@ autoaim_camera:
     camera_name: "autoaim_sentry" # 相机的名称，可以在MVS里面设定
     enable_imu_trigger: false # 是否启用硬触发
 
-    frame_rate: 100.0 # 仅在连续触发模式生效
+    frame_rate: 80.0 # 仅在连续触发模式生效
     exposure: 2000.0
     gain: 16.0
 

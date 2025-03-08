@@ -4,7 +4,7 @@
 
 #include <Eigen/Dense>
 #include <opencv2/opencv.hpp>
-#include <autoaim_interfaces/msg/detection.hpp>
+#include <hw_sentry_interfaces/msg/detection.hpp>
 #include <geometry_msgs/msg/transform.hpp>
 
 #include <math_utils.hpp>
@@ -25,7 +25,7 @@ public:
         @note 相机坐标系、装甲板坐标系和云台系方向都是是正常的（向前是x，向左是y，向上是z）。
     */
     void get_rotation(
-        const autoaim_interfaces::msg::Detection& detection,
+        const hw_sentry_interfaces::msg::Detection& detection,
         geometry_msgs::msg::Transform& transform,
         const std::tuple<float, float, float>& gimbal_rpy
     ) const;
@@ -92,7 +92,7 @@ void TrisectionYaw::set_cam_matrix(const cv::Mat intrinsic, const cv::Mat distor
 }
 
 void TrisectionYaw::get_rotation(
-    const autoaim_interfaces::msg::Detection& detection,
+    const hw_sentry_interfaces::msg::Detection& detection,
     geometry_msgs::msg::Transform& transform,
     const std::tuple<float, float, float>& gimbal_ypr
 ) const {

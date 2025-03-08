@@ -8,9 +8,9 @@
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
-#include <autoaim_interfaces/msg/detection_array.hpp>
-#include <autoaim_interfaces/msg/shoot_pos.hpp>
-#include <autoaim_interfaces/msg/decision_info.hpp>
+#include <hw_sentry_interfaces/msg/detection_array.hpp>
+#include <hw_sentry_interfaces/msg/shoot_pos.hpp>
+#include <hw_sentry_interfaces/msg/decision_info.hpp>
 
 #include <pnp_solver.hpp>
 #include <trisection_yaw.hpp>
@@ -18,9 +18,9 @@
 #include <trajectory.hpp>
 
 namespace autoaim_prediction {
-using autoaim_interfaces::msg::DecisionInfo;
-using autoaim_interfaces::msg::Detection;
-using autoaim_interfaces::msg::DetectionArray;
+using hw_sentry_interfaces::msg::DecisionInfo;
+using hw_sentry_interfaces::msg::Detection;
+using hw_sentry_interfaces::msg::DetectionArray;
 
 const geometry_msgs::msg::Transform EMPTY_TRANSFORM;
 
@@ -74,7 +74,7 @@ private:
     std::shared_ptr<rclcpp::Subscription<DetectionArray>> detection_sub_;
     std::shared_ptr<rclcpp::Subscription<sensor_msgs::msg::CameraInfo>> camera_info_sub_;
     std::shared_ptr<rclcpp::Subscription<DecisionInfo>> decision_info_sub_;
-    std::shared_ptr<rclcpp::Publisher<autoaim_interfaces::msg::ShootPos>> shoot_pos_pub_;
+    std::shared_ptr<rclcpp::Publisher<hw_sentry_interfaces::msg::ShootPos>> shoot_pos_pub_;
 
     std::shared_ptr<PnPSolver> pnp_solver_;
     std::shared_ptr<TrisectionYaw> trisection_yaw_;
@@ -127,7 +127,7 @@ void PredictionNode::get_parameters() {
         rclcpp::SensorDataQoS().keep_last(1),
         [&](const DecisionInfo::SharedPtr msg) { decision_callback(msg); }
     );
-    shoot_pos_pub_ = create_publisher<autoaim_interfaces::msg::ShootPos>(
+    shoot_pos_pub_ = create_publisher<hw_sentry_interfaces::msg::ShootPos>(
         shoot_pos_pub_topic, 
         rclcpp::SensorDataQoS().keep_last(1)
     );
@@ -236,7 +236,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             );
         }
         if (enable_send_to_serial_ && tracker_->tracker_status != TRACKER_STATUS::TEMP_LOST) {
-            autoaim_interfaces::msg::ShootPos shoot_pos;
+            hw_sentry_interfaces::msg::ShootPos shoot_pos;
             shoot_pos.header.stamp = msg->header.stamp;
             // 发送给电控的shoot_flag中，0是不发弹，1是单发，2是连发。
             // 一般打人用连发，打符用单发。
