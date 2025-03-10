@@ -9,6 +9,7 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
 #include <hw_sentry_interfaces/msg/detection_array.hpp>
+#include <hw_sentry_interfaces/msg/armor_distance.hpp>
 #include <hw_sentry_interfaces/msg/shoot_pos.hpp>
 #include <hw_sentry_interfaces/msg/decision_info.hpp>
 
@@ -74,6 +75,8 @@ private:
     std::shared_ptr<rclcpp::Subscription<DetectionArray>> detection_sub_;
     std::shared_ptr<rclcpp::Subscription<sensor_msgs::msg::CameraInfo>> camera_info_sub_;
     std::shared_ptr<rclcpp::Subscription<DecisionInfo>> decision_info_sub_;
+
+    std::shared_ptr<rclcpp::Publisher<hw_sentry_interfaces::msg::ArmorDistance>> armor_dist_pub_;
     std::shared_ptr<rclcpp::Publisher<hw_sentry_interfaces::msg::ShootPos>> shoot_pos_pub_;
 
     std::shared_ptr<PnPSolver> pnp_solver_;
@@ -111,6 +114,8 @@ void PredictionNode::get_parameters() {
         declare_parameter("camera_info_topic", "/camera/color/camera_info");
     std::string detection_sub_topic = declare_parameter("detection_sub_topic", "/detection");
     std::string decision_info_sub_topic = declare_parameter("decision_info_sub_topic", "/decision");
+    std::string armor_distance_pub_topic =
+        declare_parameter("armor_distance_pub_topic", "/prediction/armor_distance");
     std::string shoot_pos_pub_topic = declare_parameter("shoot_pos_pub_topic", "/serial/shoot_pos");
     camera_info_sub_ = create_subscription<sensor_msgs::msg::CameraInfo>(
         camera_info_topic,
@@ -127,13 +132,40 @@ void PredictionNode::get_parameters() {
         rclcpp::SensorDataQoS().keep_last(1),
         [&](const DecisionInfo::SharedPtr msg) { decision_callback(msg); }
     );
+    armor_dist_pub_ = create_publisher<hw_sentry_interfaces::msg::ArmorDistance>(
+        armor_distance_pub_topic,
+        rclcpp::SensorDataQoS().keep_last(1)
+    );
     shoot_pos_pub_ = create_publisher<hw_sentry_interfaces::msg::ShootPos>(
-        shoot_pos_pub_topic, 
+        shoot_pos_pub_topic,
         rclcpp::SensorDataQoS().keep_last(1)
     );
 }
 
 void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) const {
+    // 这个thread把视野中所有装甲板的距离解算出来并发出去，用于决策
+    if (!msg->detections.empty()) {
+        auto thread = std::thread([=]() {
+            hw_sentry_interfaces::msg::ArmorDistance armor_distance;
+            armor_distance.header.stamp = msg->header.stamp;
+            bool occurs[4][10] = {0};
+            for (const auto& armor: msg->detections) {
+                if (!occurs[armor.color][armor.label]) {
+                    occurs[armor.color][armor.label] = 1;
+                    geometry_msgs::msg::Transform armor_to_cam;
+                    pnp_solver_->get_translation(armor, armor_to_cam);
+                    armor_distance.colors.emplace_back(armor.color);
+                    armor_distance.labels.emplace_back(armor.label);
+                    const float x = armor_to_cam.translation.x;
+                    const float y = armor_to_cam.translation.y;
+                    const float z = armor_to_cam.translation.z;
+                    armor_distance.distances.emplace_back(sqrt(x * x + y * y + z * z));
+                }
+            }
+            armor_dist_pub_->publish(armor_distance);
+        });
+        thread.detach();
+    }
     // 查询时间设置为图像时间减一定时间，是因为相机曝光、处理和传输有延迟
     // 相机曝光设置为2000时，图像时间（即msg->header.stamp）大概比串口节点发布的gimbal tf变换时间晚1.7ms (±0.3ms)
     // 不减掉这段时间的话，tf2查询会出现错误：Lookup would require extrapolation into the future.
@@ -166,7 +198,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             ); // 设置1ms的timeout，因为tf发布后需要一段时间才能到tf_buffer里
             tracker_->push(armor_to_chassis.transform);
         } catch (const tf2::TransformException& ex) {
-            RCLCPP_ERROR(
+            RCLCPP_WARN(
                 get_logger(),
                 "Failed to get transform from %s to chassis: %s",
                 armor_name.c_str(),
@@ -204,7 +236,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
                 std::chrono::milliseconds(1)
             );
         } catch (const tf2::TransformException& ex) {
-            RCLCPP_ERROR(
+            RCLCPP_WARN(
                 get_logger(),
                 "Failed to get transform from prediction to fake_fric: %s",
                 ex.what()
@@ -332,7 +364,7 @@ std::tuple<float, float, float> PredictionNode::get_gimbal_ypr(const rclcpp::Tim
     try {
         transform = tf_buffer_->lookupTransform("chassis", "gimbal_pitch", time_point).transform;
     } catch (const std::exception& ex) {
-        RCLCPP_ERROR(get_logger(),
+        RCLCPP_WARN(get_logger(),
             "Failed to get transform from gimbal_pitch to chasis: %s",
             ex.what()
         );

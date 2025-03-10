@@ -109,11 +109,17 @@ void TrisectionYaw::get_rotation(
         static_cast<float>(transform.translation.y),
         static_cast<float>(transform.translation.z)
     };
+    const float vertical_delta_x = (detection.tl.x + detection.tr.x - detection.bl.x - detection.br.x) / 2;
+    const float vertical_delta_y = (detection.tl.y + detection.tr.y - detection.bl.y - detection.br.y) / 2;
+    float prior_yaw = asin(vertical_delta_x / vertical_delta_y / abs(tan(math::d2r(15) - gimbal_pitch)));
+    if (!(-M_PI / 4 <= prior_yaw && prior_yaw <= M_PI / 4)) {
+        prior_yaw = M_PI / 4;
+    }
     std::function cost_func = [&](float yaw) -> float {
         std::vector<cv::Point3f> spinned_armor_pts =
             spin_armor_3d(armor_center, detection.label, math::d2r(15) - gimbal_pitch, yaw);
         std::vector<cv::Point2f> spinned_armor_pts_2d = project_3d_to_2d(spinned_armor_pts);
-        return get_pts_cost(image_pts, spinned_armor_pts_2d, M_PI / 12);
+        return get_pts_cost(image_pts, spinned_armor_pts_2d, prior_yaw);
     };
     const float armor_yaw =
         trisection_find_min(-M_PI / 2, M_PI / 2, cost_func, FIND_ANGLE_ITERATIONS).first;

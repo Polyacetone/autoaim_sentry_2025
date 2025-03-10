@@ -1,11 +1,11 @@
 autoaim_prediction:
   ros__parameters:
-    enable_print_state: true
-    enable_send_to_serial: true
+    enable_print_state: false
+    enable_send_to_serial: false
     
     # 决策没跑起来时，使用以下指定的参数。收到决策发送的消息后会被覆盖
     target_color: 1 # 0: blue, 1: red, 2: gray
-    target_armor: 0
+    target_armor: 3
     bullet_speed: 24.0 # 单位: m/s
 
     control_to_fire_time: 0.08 # 单位: s
@@ -15,4 +15,6 @@ autoaim_prediction:
     camera_info_topic: "/camera/color/camera_info"
     detection_sub_topic: "/detection"
     decision_info_sub_topic: "/decision"
+
+    armor_distance_pub_topic: "/prediction/armor_distance"
     shoot_pos_pub_topic: "/serial/shoot_pos"

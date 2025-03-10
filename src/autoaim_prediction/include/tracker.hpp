@@ -131,7 +131,7 @@ void Tracker::update(const double time_stamp) {
             kf_xyz_->predict(time_elapsed);
             kf_yaw_->predict(time_elapsed);
             ukf_->predict(time_elapsed);
-            const float delta_angle = armors_[0].angle - prev_angle;
+            const float delta_angle = math::rad_period_correction(armors_[0].angle - prev_angle);
             yaw_ += delta_angle;
             if (delta_angle < -SWITCH_ARMOR_ANGLE) { // 逆时针转（角速度大于0）时切换装甲板
                 observing_armor_id_++;
@@ -171,7 +171,7 @@ std::tuple<cv::Point3f, bool> Tracker::get_prediction(
     const float bullet_speed, 
     const float img_to_fire_time
 ) {
-    if (abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD) { // 平动，只用KFXYZ预测
+    if (false && abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD) { // 平动，只用KFXYZ预测
         // 理论上来说要精确求出这里的击打时间需要解一个方程，这里为了简化直接采用一阶近似
         // img_to_hit_time = img_to_fire_time + fire_to_hit_time
         const float img_to_hit_time = img_to_fire_time
