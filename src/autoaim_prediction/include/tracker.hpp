@@ -30,7 +30,7 @@ public:
         @param img_to_fire_time 图像时间到开火时间的估计值
         @return 预测的击打坐标，和是否发弹（即shoot_flag）
     */
-    std::tuple<cv::Point3f, bool> get_prediction(
+    std::tuple<cv::Point3f, bool> get_target_pos(
         const float gimbal_yaw,
         const float bullet_speed, 
         const float img_to_fire_time
@@ -49,6 +49,7 @@ private:
     float FAR_HEIGHT_FILTER_RATIO = 0.7;
     float ANTITOP_PALSTANCE_THRESHOLD = math::d2r(50);
     float ANTITOP_CAN_SHOOT_ANGLE = math::d2r(30);
+    float ANTITOP_FOLLOW_ANGLE = math::d2r(30);
     int MAX_LOST_FRAMES = 5;
     int CONVERGE_FRAMES = 5;
 
@@ -166,7 +167,7 @@ void Tracker::update(const double time_stamp) {
     prev = time_stamp;
 }
 
-std::tuple<cv::Point3f, bool> Tracker::get_prediction(
+std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
     const float gimbal_yaw,
     const float bullet_speed, 
     const float img_to_fire_time
@@ -199,15 +200,27 @@ std::tuple<cv::Point3f, bool> Tracker::get_prediction(
                 target_armor_index = (observing_armor_id_ + i) % 2;
             }
         }
-        const float target_angle_to_world = 
-            math::rad_period_correction(target_angle_to_gimbal + gimbal_yaw);
-        const cv::Point3f prediction = cv::Point3f(
-            pred_center.x - cos(target_angle_to_world) * radius_[target_armor_index],
-            pred_center.y - sin(target_angle_to_world) * radius_[target_armor_index],
-            height_[target_armor_index]
-        );
-        const bool shoot_flag = abs(target_angle_to_gimbal) < ANTITOP_CAN_SHOOT_ANGLE;
-        return std::make_tuple(prediction, shoot_flag);
+        if (abs(target_angle_to_gimbal) < ANTITOP_FOLLOW_ANGLE) { // 跟随射击
+            const float target_angle_to_world = 
+                math::rad_period_correction(target_angle_to_gimbal + gimbal_yaw);
+            const cv::Point3f target = cv::Point3f(
+                pred_center.x - cos(target_angle_to_world) * radius_[target_armor_index],
+                pred_center.y - sin(target_angle_to_world) * radius_[target_armor_index],
+                height_[target_armor_index]
+            );
+            const bool shoot_flag = abs(target_angle_to_gimbal) < ANTITOP_CAN_SHOOT_ANGLE;
+            return std::make_tuple(target, shoot_flag);
+        } else { // 去下一块装甲板出现位置准备射击
+            const float next_follow_angle_to_world = math::rad_period_correction(
+                (kf_yaw_->palstance > 0 ? -1 : 1) * ANTITOP_FOLLOW_ANGLE + gimbal_yaw
+            );
+            const cv::Point3f target = cv::Point3f(
+                pred_center.x - cos(next_follow_angle_to_world) * radius_[1 - target_armor_index],
+                pred_center.y - sin(next_follow_angle_to_world) * radius_[1 - target_armor_index],
+                height_[1 - target_armor_index]
+            );
+            return std::make_tuple(target, false);
+        }
     }
 }
 
@@ -252,6 +265,7 @@ void Tracker::load_params(const std::string& params_path) {
     fs["Tracker"]["close_height_filter_ratio"] >> CLOSE_HEIGHT_FILTER_RATIO;
     fs["Tracker"]["far_height_filter_ratio"] >> FAR_HEIGHT_FILTER_RATIO;
     fs["Tracker"]["antitop_palstance_threshold"] >> ANTITOP_PALSTANCE_THRESHOLD;
+    fs["Tracker"]["antitop_follow_angle"] >> ANTITOP_FOLLOW_ANGLE;
     fs["Tracker"]["antitop_can_shoot_angle"] >> ANTITOP_CAN_SHOOT_ANGLE;
     fs["Tracker"]["max_lost_frames"] >> MAX_LOST_FRAMES;
     fs["Tracker"]["converge_frames"] >> CONVERGE_FRAMES;

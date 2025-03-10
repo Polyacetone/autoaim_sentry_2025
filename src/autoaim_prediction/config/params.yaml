@@ -1,7 +1,7 @@
-autoaim_prediction:
+/**:
   ros__parameters:
-    enable_print_state: false
-    enable_send_to_serial: false
+    enable_print_state: true
+    enable_send_to_serial: true
     
     # 决策没跑起来时，使用以下指定的参数。收到决策发送的消息后会被覆盖
     target_color: 1 # 0: blue, 1: red, 2: gray
@@ -12,9 +12,9 @@ autoaim_prediction:
     shoot_compensate_pitch: -1.3 # 单位: deg
     shoot_compensate_yaw: -1.6 # 单位: deg
 
-    camera_info_topic: "/camera/color/camera_info"
-    detection_sub_topic: "/detection"
-    decision_info_sub_topic: "/decision"
+    camera_info_topic: "camera/color/camera_info"
+    detection_sub_topic: "detection"
+    decision_info_sub_topic: "autoaim_target"
 
-    armor_distance_pub_topic: "/prediction/armor_distance"
-    shoot_pos_pub_topic: "/serial/shoot_pos"
+    armor_distance_pub_topic: "prediction/armor_distance"
+    shoot_pos_pub_topic: "serial/shoot_pos"

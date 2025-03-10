@@ -1,12 +1,12 @@
-autoaim_camera:
+/**:
   ros__parameters:
     enable_fps: false # 是否显示相机帧率
     camera_name: "autoaim_sentry" # 相机的名称，可以在MVS里面设定
     enable_imu_trigger: false # 是否启用硬触发
 
-    frame_rate: 80.0 # 仅在连续触发模式生效
-    exposure: 2000.0
+    frame_rate: 100.0 # 仅在连续触发模式生效
+    exposure: 1000.0
     gain: 16.0
 
-    img_pub_topic: "/camera/color/image_raw" # 发布的topic名字
+    img_pub_topic: "camera/color/image_raw" # 发布的topic名字
     camera_info_url: "package://autoaim_camera/config/camera_info.yaml" # 相机参数的url

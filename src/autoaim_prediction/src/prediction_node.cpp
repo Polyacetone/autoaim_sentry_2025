@@ -144,11 +144,11 @@ void PredictionNode::get_parameters() {
 
 void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) const {
     // 这个thread把视野中所有装甲板的距离解算出来并发出去，用于决策
-    if (!msg->detections.empty()) {
-        auto thread = std::thread([=]() {
-            hw_sentry_interfaces::msg::ArmorDistance armor_distance;
-            armor_distance.header.stamp = msg->header.stamp;
-            bool occurs[4][10] = {0};
+    auto thread = std::thread([=]() {
+        hw_sentry_interfaces::msg::ArmorDistance armor_distance;
+        armor_distance.header.stamp = msg->header.stamp;
+        bool occurs[4][10] = {0};
+        if (!msg->detections.empty()) {
             for (const auto& armor: msg->detections) {
                 if (!occurs[armor.color][armor.label]) {
                     occurs[armor.color][armor.label] = 1;
@@ -162,10 +162,10 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
                     armor_distance.distances.emplace_back(sqrt(x * x + y * y + z * z));
                 }
             }
-            armor_dist_pub_->publish(armor_distance);
-        });
-        thread.detach();
-    }
+        }
+        armor_dist_pub_->publish(armor_distance);
+    });
+    thread.detach();
     // 查询时间设置为图像时间减一定时间，是因为相机曝光、处理和传输有延迟
     // 相机曝光设置为2000时，图像时间（即msg->header.stamp）大概比串口节点发布的gimbal tf变换时间晚1.7ms (±0.3ms)
     // 不减掉这段时间的话，tf2查询会出现错误：Lookup would require extrapolation into the future.
@@ -208,53 +208,53 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
     }
     tracker_->update(to_sec(msg->header.stamp));
     if (tracker_->tracker_status != TRACKER_STATUS::LOST) {
-        cv::Point3f prediction;
+        cv::Point3f target;
         bool can_shoot;
-        std::tie(prediction, can_shoot) = tracker_->get_prediction(
+        std::tie(target, can_shoot) = tracker_->get_target_pos(
             gimbal_yaw,
             bullet_speed_,
             to_sec(now()) - to_sec(msg->header.stamp) + control_to_fire_time_
             // img_to_fire_time = img_to_control_time + control_to_fire_time
         );
 
-        geometry_msgs::msg::TransformStamped prediction_to_chassis;
-        prediction_to_chassis.header.stamp = msg->header.stamp;
-        prediction_to_chassis.header.frame_id = "chassis";
-        prediction_to_chassis.child_frame_id = "prediction";
-        prediction_to_chassis.transform.translation.x = prediction.x;
-        prediction_to_chassis.transform.translation.y = prediction.y;
-        prediction_to_chassis.transform.translation.z = prediction.z;
-        tf_broadcaster_->sendTransform(prediction_to_chassis);
+        geometry_msgs::msg::TransformStamped target_to_chassis;
+        target_to_chassis.header.stamp = msg->header.stamp;
+        target_to_chassis.header.frame_id = "chassis";
+        target_to_chassis.child_frame_id = "target";
+        target_to_chassis.transform.translation.x = target.x;
+        target_to_chassis.transform.translation.y = target.y;
+        target_to_chassis.transform.translation.z = target.z;
+        tf_broadcaster_->sendTransform(target_to_chassis);
 
-        geometry_msgs::msg::TransformStamped prediction_to_fric;
+        geometry_msgs::msg::TransformStamped target_to_fric;
         try {
             // fake_fric是原点在摩擦轮系，但方向和大yaw相同的系。解出来的角度方便控车
-            prediction_to_fric = tf_buffer_->lookupTransform(
+            target_to_fric = tf_buffer_->lookupTransform(
                 "fake_fric",
-                "prediction",
+                "target",
                 msg->header.stamp,
                 std::chrono::milliseconds(1)
             );
         } catch (const tf2::TransformException& ex) {
             RCLCPP_WARN(
                 get_logger(),
-                "Failed to get transform from prediction to fake_fric: %s",
+                "Failed to get transform from target to fake_fric: %s",
                 ex.what()
             );
             return;
         }
 
         // 注意：发给电控的pitch是向上转为正。但我们在之前的计算中都是向下转为正（因为符合右手定则）。
-        const float predicted_pitch = trajectory::calc_pitch(
-            prediction_to_fric.transform.translation.x,
-            prediction_to_fric.transform.translation.y,
-            prediction_to_fric.transform.translation.z,
+        const float target_pitch = trajectory::calc_pitch(
+            target_to_fric.transform.translation.x,
+            target_to_fric.transform.translation.y,
+            target_to_fric.transform.translation.z,
             bullet_speed_
         ) + math::d2r(shoot_compensate_pitch_);
-        const float predicted_yaw = math::rad_period_correction(
+        const float target_yaw = math::rad_period_correction(
             atan2(
-                prediction_to_fric.transform.translation.y,
-                prediction_to_fric.transform.translation.x
+                target_to_fric.transform.translation.y,
+                target_to_fric.transform.translation.x
             )
         ) + math::d2r(shoot_compensate_yaw_);
         
@@ -262,8 +262,8 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             tracker_->debug_print_state();
             std::printf(
                 "Pitch: %4.1f  Yaw: %4.1f (degree)    Shoot_flag: %s\n",
-                math::r2d(predicted_pitch),
-                math::r2d(predicted_yaw),
+                math::r2d(target_pitch),
+                math::r2d(target_yaw),
                 (can_shoot ? "true" : "false")
             );
         }
@@ -273,8 +273,8 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             // 发送给电控的shoot_flag中，0是不发弹，1是单发，2是连发。
             // 一般打人用连发，打符用单发。
             shoot_pos.shoot_flag = can_shoot ? 2 : 0;
-            shoot_pos.pitch = predicted_pitch;
-            shoot_pos.yaw = predicted_yaw;
+            shoot_pos.pitch = target_pitch;
+            shoot_pos.yaw = target_yaw;
             shoot_pos_pub_->publish(shoot_pos);
         }
     }
@@ -283,7 +283,6 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
 void PredictionNode::decision_callback(const DecisionInfo::SharedPtr msg) {
     target_color_ = msg->color;
     target_armor_ = msg->label;
-    bullet_speed_ = msg->bullet_speed;
 }
 
 void PredictionNode::camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg) {

@@ -1,12 +1,12 @@
-autoaim_detection:
+/**:
   ros__parameters:
-    image_topic: "/camera/color/image_raw"
-    detection_topic: "/detection"
-    image_detected_topic: "/debug/detected_image"
+    image_topic: "camera/color/image_raw"
+    detection_topic: "detection"
+    image_detected_topic: "debug/detected_image"
 
-    model_path: "20250305v12decoupled.xml"
+    model_path: "20250310v11.xml"
     confidence_threshold: 0.4
     nms_threshold: 0.4
 
-    enable_detected_image: true
+    enable_detected_image: false
     enable_fps: false

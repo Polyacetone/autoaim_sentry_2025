@@ -11,9 +11,10 @@ Tracker:
   switch_armor_angle: 1.0472 # 角度突变的阈值，用于判断小陀螺跟踪的装甲板是否切换。这里是60度对应的弧度
   close_radius_filter_ratio: 0.95 # 较近的装甲板对应半径的惯性滤波系数
   far_radius_filter_ratio: 0.99 # 较远的装甲板对应半径的惯性滤波系数
-  close_height_filter_ratio: 0.6 # 较近的装甲板对应高度的惯性滤波系数
-  far_height_filter_ratio: 0.8 # 较远的装甲板对应高度的惯性滤波系数
+  close_height_filter_ratio: 0.9 # 较近的装甲板对应高度的惯性滤波系数
+  far_height_filter_ratio: 0.95 # 较远的装甲板对应高度的惯性滤波系数
   antitop_palstance_threshold: 1.74533 # 启用反陀螺的角速度阈值。1.74533rad/s = 100deg/s
+  antitop_follow_angle: 0.6 # 小陀螺时，让yaw跟随的角度最大值。若超过则在另一边等待
   antitop_can_shoot_angle: 0.4 # 小陀螺时，shoot_flag置为true的角度最大值
   max_lost_frames: 20 # 最大的丢失帧数。超过就从TEMP_LOST变为LOST
   converge_frames: 10 # 收敛帧数。超过则从CONVERGING变为TRACKING
@@ -57,14 +58,14 @@ UKFXY:
     rows: 4
     cols: 4
     dt: f
-    data: [ 1e-4,  0,  0,  0,
-            0,  1e-4,  0,  0,
-            0,  0,  1e-8,  0,
-            0,  0,  0,  1e-8 ]
+    data: [ 1e-2,  0,  0,  0,
+            0,  1e-2,  0,  0,
+            0,  0,  5e-1,  0,
+            0,  0,  0,  5e-1 ]
 
   measurement_noise_cov: !!opencv-matrix
     rows: 2
     cols: 2
     dt: f
-    data: [ 1e-2,  0,
-            0,  1e-2 ]
+    data: [ 1e-1,  0,
+            0,  1e-1 ]

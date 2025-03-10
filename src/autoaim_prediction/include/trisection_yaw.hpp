@@ -35,12 +35,12 @@ private:
         @brief 计算实际的角点和重投影后的角点的差异。作为传入三分法的损失函数。
         @param ref_pts yolo实际识别出的角点。
         @param rotated_pts 旋转一个角度后，重投影后的角点。
-        @param prior_yaw 先验估计的yaw角。
+        @param abs_prior_yaw 先验估计的yaw角的绝对值。
     */
     float get_pts_cost(
         const std::vector<cv::Point2f>& ref_pts,
         const std::vector<cv::Point2f>& rotated_pts,
-        const float& prior_yaw
+        const float& abs_prior_yaw
     ) const;
 
     /*!
@@ -111,15 +111,15 @@ void TrisectionYaw::get_rotation(
     };
     const float vertical_delta_x = (detection.tl.x + detection.tr.x - detection.bl.x - detection.br.x) / 2;
     const float vertical_delta_y = (detection.tl.y + detection.tr.y - detection.bl.y - detection.br.y) / 2;
-    float prior_yaw = asin(vertical_delta_x / vertical_delta_y / abs(tan(math::d2r(15) - gimbal_pitch)));
-    if (!(-M_PI / 4 <= prior_yaw && prior_yaw <= M_PI / 4)) {
-        prior_yaw = M_PI / 4;
+    float abs_prior_yaw = asin(abs(vertical_delta_x / vertical_delta_y / tan(math::d2r(15) - gimbal_pitch)));
+    if (!(-M_PI / 4 <= abs_prior_yaw && abs_prior_yaw <= M_PI / 4)) {
+        abs_prior_yaw = M_PI / 4;
     }
     std::function cost_func = [&](float yaw) -> float {
         std::vector<cv::Point3f> spinned_armor_pts =
             spin_armor_3d(armor_center, detection.label, math::d2r(15) - gimbal_pitch, yaw);
         std::vector<cv::Point2f> spinned_armor_pts_2d = project_3d_to_2d(spinned_armor_pts);
-        return get_pts_cost(image_pts, spinned_armor_pts_2d, prior_yaw);
+        return get_pts_cost(image_pts, spinned_armor_pts_2d, abs_prior_yaw);
     };
     const float armor_yaw =
         trisection_find_min(-M_PI / 2, M_PI / 2, cost_func, FIND_ANGLE_ITERATIONS).first;
@@ -136,7 +136,7 @@ void TrisectionYaw::get_rotation(
 float TrisectionYaw::get_pts_cost(
     const std::vector<cv::Point2f>& ref_pts,
     const std::vector<cv::Point2f>& rotated_pts,
-    const float& prior_yaw
+    const float& abs_prior_yaw
 ) const {
     std::size_t size = ref_pts.size();
     std::vector<Eigen::Vector2f> refs;
@@ -159,8 +159,8 @@ float TrisectionYaw::get_pts_cost(
         float angular_dis = ref_d.norm() * math::get_angle(ref_d, pt_d) / ref_d.norm();
         // 平方可能是为了配合 sin 和 cos
         // 弧度差代价（0 度左右占比应该大）
-        float cost_i = math::squre(pixel_dis * std::sin(prior_yaw))
-            + math::squre(angular_dis * std::cos(prior_yaw)) * DETECTOR_ERROR_PIXEL_BY_SLOPE;
+        float cost_i = math::squre(pixel_dis * std::sin(abs_prior_yaw))
+            + math::squre(angular_dis * std::cos(abs_prior_yaw)) * DETECTOR_ERROR_PIXEL_BY_SLOPE;
         // 重投影像素误差越大，越相信斜率
         cost += std::sqrt(cost_i);
     }
