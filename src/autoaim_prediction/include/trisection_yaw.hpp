@@ -73,7 +73,7 @@ private:
         const int iterations
     ) const;
 
-    static constexpr int FIND_ANGLE_ITERATIONS = 15; // 三分法迭代次数，理想精度<1
+    static constexpr int FIND_ANGLE_ITERATIONS = 12; // 三分法迭代次数，理想精度<1
     static constexpr float SIMPLE_TOP_TRACK_AREA_RATIO = 2.0;
     static constexpr float DETECTOR_ERROR_PIXEL_BY_SLOPE = 2.0;
 
@@ -115,6 +115,7 @@ void TrisectionYaw::get_rotation(
     if (!(-M_PI / 4 <= abs_prior_yaw && abs_prior_yaw <= M_PI / 4)) {
         abs_prior_yaw = M_PI / 4;
     }
+    const float prior_yaw = abs_prior_yaw * (vertical_delta_x > 0 ? -1 : 1);
     std::function cost_func = [&](float yaw) -> float {
         std::vector<cv::Point3f> spinned_armor_pts =
             spin_armor_3d(armor_center, detection.label, math::d2r(15) - gimbal_pitch, yaw);
@@ -122,7 +123,7 @@ void TrisectionYaw::get_rotation(
         return get_pts_cost(image_pts, spinned_armor_pts_2d, abs_prior_yaw);
     };
     const float armor_yaw =
-        trisection_find_min(-M_PI / 2, M_PI / 2, cost_func, FIND_ANGLE_ITERATIONS).first;
+        trisection_find_min(prior_yaw - M_PI / 6, prior_yaw + M_PI / 6, cost_func, FIND_ANGLE_ITERATIONS).first;
     tf2::Quaternion quaternion;
     // setRPY绕固定轴旋转。旋转顺序是绕XYZ。
     // 这里写入的旋转是相对于相机系。

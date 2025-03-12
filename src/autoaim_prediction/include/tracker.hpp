@@ -172,7 +172,7 @@ std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
     const float bullet_speed, 
     const float img_to_fire_time
 ) {
-    if (false && abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD) { // 平动，只用KFXYZ预测
+    if (abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD) { // 平动，只用KFXYZ预测
         // 理论上来说要精确求出这里的击打时间需要解一个方程，这里为了简化直接采用一阶近似
         // img_to_hit_time = img_to_fire_time + fire_to_hit_time
         const float img_to_hit_time = img_to_fire_time

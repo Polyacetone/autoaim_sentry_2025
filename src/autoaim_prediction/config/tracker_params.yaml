@@ -14,8 +14,8 @@ Tracker:
   close_height_filter_ratio: 0.9 # 较近的装甲板对应高度的惯性滤波系数
   far_height_filter_ratio: 0.95 # 较远的装甲板对应高度的惯性滤波系数
   antitop_palstance_threshold: 1.74533 # 启用反陀螺的角速度阈值。1.74533rad/s = 100deg/s
-  antitop_follow_angle: 0.6 # 小陀螺时，让yaw跟随的角度最大值。若超过则在另一边等待
-  antitop_can_shoot_angle: 0.4 # 小陀螺时，shoot_flag置为true的角度最大值
+  antitop_follow_angle: 0.4 # 小陀螺时，让yaw跟随的角度最大值。若超过则在另一边等待
+  antitop_can_shoot_angle: 0.25 # 小陀螺时，shoot_flag置为true的角度最大值
   max_lost_frames: 20 # 最大的丢失帧数。超过就从TEMP_LOST变为LOST
   converge_frames: 10 # 收敛帧数。超过则从CONVERGING变为TRACKING
 
@@ -44,8 +44,8 @@ KFYaw:
     rows: 2
     cols: 2
     dt: f
-    data: [ 1e-5,  0, 
-            0,  1e-3 ]
+    data: [ 5e-5,  0, 
+            0,  5e-3 ]
 
   measurement_noise_cov: !!opencv-matrix
     rows: 1
@@ -58,10 +58,10 @@ UKFXY:
     rows: 4
     cols: 4
     dt: f
-    data: [ 1e-2,  0,  0,  0,
-            0,  1e-2,  0,  0,
-            0,  0,  5e-1,  0,
-            0,  0,  0,  5e-1 ]
+    data: [ 5e-2,  0,  0,  0,
+            0,  5e-2,  0,  0,
+            0,  0,  1e-0,  0,
+            0,  0,  0,  1e-0 ]
 
   measurement_noise_cov: !!opencv-matrix
     rows: 2

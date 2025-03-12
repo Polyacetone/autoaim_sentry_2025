@@ -4,9 +4,9 @@
     detection_topic: "detection"
     image_detected_topic: "debug/detected_image"
 
-    model_path: "20250310v11.xml"
+    model_path: "20250312v11.xml"
     confidence_threshold: 0.4
     nms_threshold: 0.4
 
-    enable_detected_image: false
+    enable_detected_image: true
     enable_fps: false

@@ -53,6 +53,13 @@ private:
     // 选择目标颜色和标签的装甲板，并按照一定规则进行排序
     void select_armors(const std::vector<Detection> src, std::vector<Detection>& dst) const;
 
+    // 尝试获取指定时间点对应的变换。若尝试MAX_ATTEMPTS后仍没有找到，throw一个std::runtime_error
+    geometry_msgs::msg::Transform try_get_transform(
+        const std::string& target,
+        const std::string& source,
+        const rclcpp::Time& time_point
+    ) const;
+
     // 获取指定时间的自己云台的yaw, pitch, roll（相对于chassis）。
     // 之所以是ypr不是rpy，是因为我们采用的旋转顺序是yaw, pitch, roll。
     std::tuple<float, float, float> get_gimbal_ypr(const rclcpp::Time& time_point) const;
@@ -147,7 +154,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
     auto thread = std::thread([=]() {
         hw_sentry_interfaces::msg::ArmorDistance armor_distance;
         armor_distance.header.stamp = msg->header.stamp;
-        bool occurs[4][10] = {0};
+        bool occurs[5][15] = {0};
         if (!msg->detections.empty()) {
             for (const auto& armor: msg->detections) {
                 if (!occurs[armor.color][armor.label]) {
@@ -166,12 +173,9 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
         armor_dist_pub_->publish(armor_distance);
     });
     thread.detach();
-    // 查询时间设置为图像时间减一定时间，是因为相机曝光、处理和传输有延迟
-    // 相机曝光设置为2000时，图像时间（即msg->header.stamp）大概比串口节点发布的gimbal tf变换时间晚1.7ms (±0.3ms)
-    // 不减掉这段时间的话，tf2查询会出现错误：Lookup would require extrapolation into the future.
-    std::tuple<float, float, float> gimbal_ypr = get_gimbal_ypr(
-        static_cast<rclcpp::Time>(msg->header.stamp) - std::chrono::microseconds(220)
-    );
+
+    std::tuple<float, float, float> gimbal_ypr = 
+        get_gimbal_ypr(static_cast<rclcpp::Time>(msg->header.stamp));
     float gimbal_yaw, gimbal_pitch, gimbal_roll;
     std::tie(gimbal_yaw, gimbal_pitch, gimbal_roll) = gimbal_ypr;
     std::vector<Detection> target_armors;
@@ -190,14 +194,13 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
         tf_broadcaster_->sendTransform(armor_to_cam);
         // 把装甲板的位姿转换到世界坐标系下进行滤波
         try {
-            auto armor_to_chassis = tf_buffer_->lookupTransform(
+            auto armor_to_chassis = try_get_transform(
                 "chassis",
                 armor_name,
-                msg->header.stamp,
-                std::chrono::milliseconds(1)
-            ); // 设置1ms的timeout，因为tf发布后需要一段时间才能到tf_buffer里
-            tracker_->push(armor_to_chassis.transform);
-        } catch (const tf2::TransformException& ex) {
+                msg->header.stamp
+            );
+            tracker_->push(armor_to_chassis);
+        } catch (const std::exception& ex) {
             RCLCPP_WARN(
                 get_logger(),
                 "Failed to get transform from %s to chassis: %s",
@@ -226,16 +229,15 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
         target_to_chassis.transform.translation.z = target.z;
         tf_broadcaster_->sendTransform(target_to_chassis);
 
-        geometry_msgs::msg::TransformStamped target_to_fric;
+        geometry_msgs::msg::Transform target_to_fric;
         try {
             // fake_fric是原点在摩擦轮系，但方向和大yaw相同的系。解出来的角度方便控车
-            target_to_fric = tf_buffer_->lookupTransform(
+            target_to_fric = try_get_transform(
                 "fake_fric",
                 "target",
-                msg->header.stamp,
-                std::chrono::milliseconds(1)
+                msg->header.stamp
             );
-        } catch (const tf2::TransformException& ex) {
+        } catch (const std::exception& ex) {
             RCLCPP_WARN(
                 get_logger(),
                 "Failed to get transform from target to fake_fric: %s",
@@ -246,15 +248,15 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
 
         // 注意：发给电控的pitch是向上转为正。但我们在之前的计算中都是向下转为正（因为符合右手定则）。
         const float target_pitch = trajectory::calc_pitch(
-            target_to_fric.transform.translation.x,
-            target_to_fric.transform.translation.y,
-            target_to_fric.transform.translation.z,
+            target_to_fric.translation.x,
+            target_to_fric.translation.y,
+            target_to_fric.translation.z,
             bullet_speed_
         ) + math::d2r(shoot_compensate_pitch_);
         const float target_yaw = math::rad_period_correction(
             atan2(
-                target_to_fric.transform.translation.y,
-                target_to_fric.transform.translation.x
+                target_to_fric.translation.y,
+                target_to_fric.translation.x
             )
         ) + math::d2r(shoot_compensate_yaw_);
         
@@ -272,7 +274,8 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             shoot_pos.header.stamp = msg->header.stamp;
             // 发送给电控的shoot_flag中，0是不发弹，1是单发，2是连发。
             // 一般打人用连发，打符用单发。
-            shoot_pos.shoot_flag = can_shoot ? 2 : 0;
+            shoot_pos.shoot_flag = 
+                (can_shoot ? 2 : 0) && (tracker_->tracker_status == TRACKER_STATUS::TRACKING);
             shoot_pos.pitch = target_pitch;
             shoot_pos.yaw = target_yaw;
             shoot_pos_pub_->publish(shoot_pos);
@@ -359,15 +362,17 @@ void PredictionNode::select_armors(const std::vector<Detection> src, std::vector
 }
 
 std::tuple<float, float, float> PredictionNode::get_gimbal_ypr(const rclcpp::Time& time_point) const {
+    // 保存之前找过的ypr，在lookupTransform出现异常时返回
+    static std::tuple<float, float, float> prev_ypr = std::make_tuple(0, 0, 0);
     geometry_msgs::msg::Transform transform;
     try {
         transform = tf_buffer_->lookupTransform("chassis", "gimbal_pitch", time_point).transform;
     } catch (const std::exception& ex) {
         RCLCPP_WARN(get_logger(),
-            "Failed to get transform from gimbal_pitch to chasis: %s",
+            "Failed to get transform from gimbal_pitch to chassis: %s",
             ex.what()
         );
-        return std::make_tuple(0, 0, 0);
+        return prev_ypr;
     }
     double yaw, pitch, roll;
     tf2::Quaternion quat(
@@ -378,7 +383,26 @@ std::tuple<float, float, float> PredictionNode::get_gimbal_ypr(const rclcpp::Tim
     );
     tf2::Matrix3x3 rot_mat(quat);
     rot_mat.getEulerYPR(yaw, pitch, roll);
+    prev_ypr = std::make_tuple(yaw, pitch, roll);
     return std::make_tuple(yaw, pitch, roll);
+}
+
+geometry_msgs::msg::Transform PredictionNode::try_get_transform(
+    const std::string& target,
+    const std::string& source,
+    const rclcpp::Time& time_point
+) const {
+    constexpr int MAX_ATTEMPTS = 1000;
+    geometry_msgs::msg::Transform transform;
+    for (int i = 0; i < MAX_ATTEMPTS; i++) {
+        try {
+            transform = tf_buffer_->lookupTransform(target, source, time_point).transform;
+            return transform;
+        } catch (const std::exception& ex) {
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
+        }
+    }
+    throw std::runtime_error("try_get_transform failed after 1000 attempts");
 }
 } // namespace autoaim_prediction
 
