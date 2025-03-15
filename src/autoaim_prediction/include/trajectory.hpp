@@ -67,7 +67,7 @@ std::tuple<float, float> get_pitch_air_frac(float d, float h, float v) {
 
 float calc_pitch(float x, float y, float z, float speed) {
     float pitch, fly_time;
-    std::tie(pitch, fly_time) = get_pitch_air_frac(sqrt(math::squre(x) + math::squre(y)), z, speed);
+    std::tie(pitch, fly_time) = get_pitch_air_frac(sqrt(math::square(x) + math::square(y)), z, speed);
     return pitch;
 }
 

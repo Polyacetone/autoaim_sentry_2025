@@ -19,7 +19,7 @@ constexpr float d2r(const float deg) {
     return deg * M_PI / 180.0;
 }
 
-constexpr float squre(const float x) {
+constexpr float square(const float x) {
     return x * x;
 }
 
@@ -32,14 +32,27 @@ float get_angle(const Eigen::Vector2f& vec1, const Eigen::Vector2f& vec2) {
 }
 
 float get_distance(const cv::Point3f& point) {
-    return sqrt(squre(point.x) + squre(point.y) + squre(point.z));
+    return sqrt(square(point.x) + square(point.y) + square(point.z));
 }
 
 float get_distance(const cv::Point2f& point) {
-    return sqrt(squre(point.x) + squre(point.y));
+    return sqrt(square(point.x) + square(point.y));
 }
 
 float get_distance(const cv::Point2f& point1, const cv::Point2f& point2) {
     return get_distance(point2 - point1);
 }
+
+Eigen::Vector3d to_euler_angle(Eigen::Matrix3d rot_mat) {
+    Eigen::Vector3d euler_angle;
+    euler_angle(0) = std::atan2(-rot_mat(0, 1), rot_mat(1, 1));
+    euler_angle(1) = std::atan2(
+        rot_mat(2, 1),
+        std::sqrt(rot_mat(0, 1) * rot_mat(0, 1) + rot_mat(1, 1) * rot_mat(1, 1))
+    );
+    euler_angle(2) = std::atan2(-rot_mat(2, 0), rot_mat(2, 2));
+    return euler_angle;
+}
+
+
 } // namespace math

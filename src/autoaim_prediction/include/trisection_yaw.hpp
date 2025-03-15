@@ -35,12 +35,12 @@ private:
         @brief 计算实际的角点和重投影后的角点的差异。作为传入三分法的损失函数。
         @param ref_pts yolo实际识别出的角点。
         @param rotated_pts 旋转一个角度后，重投影后的角点。
-        @param abs_prior_yaw 先验估计的yaw角的绝对值。
+        @param prior_yaw 先验估计的yaw角。
     */
     float get_pts_cost(
         const std::vector<cv::Point2f>& ref_pts,
         const std::vector<cv::Point2f>& rotated_pts,
-        const float& abs_prior_yaw
+        const float& prior_yaw
     ) const;
 
     /*!
@@ -74,7 +74,6 @@ private:
     ) const;
 
     static constexpr int FIND_ANGLE_ITERATIONS = 12; // 三分法迭代次数，理想精度<1
-    static constexpr float SIMPLE_TOP_TRACK_AREA_RATIO = 2.0;
     static constexpr float DETECTOR_ERROR_PIXEL_BY_SLOPE = 2.0;
 
     // 单位: 米
@@ -109,21 +108,23 @@ void TrisectionYaw::get_rotation(
         static_cast<float>(transform.translation.y),
         static_cast<float>(transform.translation.z)
     };
+
     const float vertical_delta_x = (detection.tl.x + detection.tr.x - detection.bl.x - detection.br.x) / 2;
     const float vertical_delta_y = (detection.tl.y + detection.tr.y - detection.bl.y - detection.br.y) / 2;
-    float abs_prior_yaw = asin(abs(vertical_delta_x / vertical_delta_y / tan(math::d2r(15) - gimbal_pitch)));
+    float abs_prior_yaw = asin(abs(vertical_delta_x / vertical_delta_y / tan(math::d2r(15))));
     if (!(-M_PI / 4 <= abs_prior_yaw && abs_prior_yaw <= M_PI / 4)) {
         abs_prior_yaw = M_PI / 4;
     }
     const float prior_yaw = abs_prior_yaw * (vertical_delta_x > 0 ? -1 : 1);
+
     std::function cost_func = [&](float yaw) -> float {
         std::vector<cv::Point3f> spinned_armor_pts =
             spin_armor_3d(armor_center, detection.label, math::d2r(15) - gimbal_pitch, yaw);
         std::vector<cv::Point2f> spinned_armor_pts_2d = project_3d_to_2d(spinned_armor_pts);
-        return get_pts_cost(image_pts, spinned_armor_pts_2d, abs_prior_yaw);
+        return get_pts_cost(image_pts, spinned_armor_pts_2d, prior_yaw);
     };
     const float armor_yaw =
-        trisection_find_min(prior_yaw - M_PI / 6, prior_yaw + M_PI / 6, cost_func, FIND_ANGLE_ITERATIONS).first;
+        trisection_find_min(prior_yaw - M_PI / 10, prior_yaw + M_PI / 10, cost_func, FIND_ANGLE_ITERATIONS).first;
     tf2::Quaternion quaternion;
     // setRPY绕固定轴旋转。旋转顺序是绕XYZ。
     // 这里写入的旋转是相对于相机系。
@@ -132,12 +133,36 @@ void TrisectionYaw::get_rotation(
     transform.rotation.y = quaternion.getY();
     transform.rotation.z = quaternion.getZ();
     transform.rotation.w = quaternion.getW();
+
+    /*std::printf("-----\n");
+    for(int i=0; i<=36; i++) {
+        std::printf("%.1f: %.2f, ", math::r2d(i*(M_PI/36)-M_PI/2), cost_func(i*(M_PI/36)-M_PI/2));
+    }
+    std::printf("\n");
+    float diff_prior = 0;
+    std::vector<cv::Point3f> prior_3d =
+        spin_armor_3d(armor_center, detection.label, math::d2r(15) - gimbal_pitch, prior_yaw);
+    std::vector<cv::Point2f> prior_2d = project_3d_to_2d(prior_3d);
+    diff_prior += math::get_distance(prior_2d[0], cv::Point2f(detection.tl.x, detection.tl.y));
+    diff_prior += math::get_distance(prior_2d[1], cv::Point2f(detection.bl.x, detection.bl.y));
+    diff_prior += math::get_distance(prior_2d[2], cv::Point2f(detection.br.x, detection.br.y));
+    diff_prior += math::get_distance(prior_2d[3], cv::Point2f(detection.tr.x, detection.tr.y));
+    float diff_result = 0;
+    std::vector<cv::Point3f> result_3d =
+        spin_armor_3d(armor_center, detection.label, math::d2r(15) - gimbal_pitch, armor_yaw);
+    std::vector<cv::Point2f> result_2d = project_3d_to_2d(result_3d);
+    diff_result += math::get_distance(result_2d[0], cv::Point2f(detection.tl.x, detection.tl.y));
+    diff_result += math::get_distance(result_2d[1], cv::Point2f(detection.bl.x, detection.bl.y));
+    diff_result += math::get_distance(result_2d[2], cv::Point2f(detection.br.x, detection.br.y));
+    diff_result += math::get_distance(result_2d[3], cv::Point2f(detection.tr.x, detection.tr.y));
+    std::printf("prior: %.2f, diff_prior: %.2f; result: %.2f, diff_result: %.2f", math::r2d(prior_yaw), diff_prior, math::r2d(armor_yaw), diff_result);
+    std::cout << std::endl;*/
 }
 
 float TrisectionYaw::get_pts_cost(
     const std::vector<cv::Point2f>& ref_pts,
     const std::vector<cv::Point2f>& rotated_pts,
-    const float& abs_prior_yaw
+    const float& prior_yaw
 ) const {
     std::size_t size = ref_pts.size();
     std::vector<Eigen::Vector2f> refs;
@@ -155,13 +180,12 @@ float TrisectionYaw::get_pts_cost(
         // 长度差代价 + 起点差代价 / 2（0 度左右应该抛弃）
         float pixel_dis = // dis 是指方差平面内到原点的距离
             (0.5 * ((refs[i] - pts[i]).norm() + (refs[p] - pts[p]).norm())
-             + std::fabs(ref_d.norm() - pt_d.norm()))
-            / ref_d.norm();
+            + std::fabs(ref_d.norm() - pt_d.norm())) / ref_d.norm();
         float angular_dis = ref_d.norm() * math::get_angle(ref_d, pt_d) / ref_d.norm();
         // 平方可能是为了配合 sin 和 cos
         // 弧度差代价（0 度左右占比应该大）
-        float cost_i = math::squre(pixel_dis * std::sin(abs_prior_yaw))
-            + math::squre(angular_dis * std::cos(abs_prior_yaw)) * DETECTOR_ERROR_PIXEL_BY_SLOPE;
+        float cost_i = math::square(pixel_dis * std::sin(prior_yaw))
+            + math::square(angular_dis * std::cos(prior_yaw)) * DETECTOR_ERROR_PIXEL_BY_SLOPE;
         // 重投影像素误差越大，越相信斜率
         cost += std::sqrt(cost_i);
     }

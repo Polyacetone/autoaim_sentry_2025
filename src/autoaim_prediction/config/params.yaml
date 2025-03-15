@@ -1,20 +1,28 @@
 /**:
   ros__parameters:
-    enable_print_state: false
+    enable_print_state: true
     enable_send_to_serial: true
-    
-    # 决策没跑起来时，使用以下指定的参数。收到决策发送的消息后会被覆盖
-    target_color: 1 # 0: blue, 1: red, 2: gray
+
+    # 启用后，当有1秒没收到决策消息，就按照自定义优先级顺序选择敌人
+    enable_self_decision: true
+    enemy_priority: [0, 1, 3]
+
+    # 默认的目标装甲板。收到决策发送的消息或自主决策启动后会被覆盖
     target_armor: 0
+
+    # 默认的目标敌人颜色和弹速。收到串口节点发送的robot_info消息后会被覆盖
+    target_color: 0 # 0: blue, 1: red, 2: gray
     bullet_speed: 24.0 # 单位: m/s
 
-    control_to_fire_time: 0.05 # 单位: s
-    shoot_compensate_pitch: -1.3 # 单位: deg
-    shoot_compensate_yaw: -1.6 # 单位: deg
+    control_to_fire_time: 0.07 # 单位: s
+    shoot_compensate_pitch: 1.5 # 单位: deg
+    shoot_compensate_yaw: -1.0 # 单位: deg
 
     camera_info_topic: "camera/color/camera_info"
     detection_sub_topic: "detection"
-    decision_info_sub_topic: "autoaim_target"
+    decision_info_sub_topic: "autoaim_target1"
+    our_color_sub_topic: "serial/our_color" # 根据自己的颜色判断击打目标颜色
+    bullet_speed_sub_topic: "serial/bullet_speed"
 
-    armor_distance_pub_topic: "prediction/armor_distance"
+    armor_distance_pub_topic: "prediction/armor_distance" # 发给决策用于判断
     shoot_pos_pub_topic: "serial/shoot_pos"

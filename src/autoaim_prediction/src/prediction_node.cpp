@@ -12,6 +12,8 @@
 #include <hw_sentry_interfaces/msg/armor_distance.hpp>
 #include <hw_sentry_interfaces/msg/shoot_pos.hpp>
 #include <hw_sentry_interfaces/msg/decision_info.hpp>
+#include <hw_sentry_interfaces/msg/our_color.hpp>
+#include <hw_sentry_interfaces/msg/bullet_speed.hpp>
 
 #include <pnp_solver.hpp>
 #include <trisection_yaw.hpp>
@@ -22,6 +24,8 @@ namespace autoaim_prediction {
 using hw_sentry_interfaces::msg::DecisionInfo;
 using hw_sentry_interfaces::msg::Detection;
 using hw_sentry_interfaces::msg::DetectionArray;
+using hw_sentry_interfaces::msg::BulletSpeed;
+using hw_sentry_interfaces::msg::OurColor;
 
 const geometry_msgs::msg::Transform EMPTY_TRANSFORM;
 
@@ -46,8 +50,7 @@ public:
 
 private:
     void get_parameters();
-    void detection_callback(const DetectionArray::SharedPtr msg) const;
-    void decision_callback(const DecisionInfo::SharedPtr msg);
+    void detection_callback(const DetectionArray::SharedPtr msg);
     void camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg);
 
     // 选择目标颜色和标签的装甲板，并按照一定规则进行排序
@@ -66,14 +69,18 @@ private:
 
     bool enable_print_state_;
     bool enable_send_to_serial_;
+    bool enable_self_decision_;
 
     int target_color_;
     int target_armor_;
     float bullet_speed_;
+    double last_decision_recv_time_ = 0;
 
     float control_to_fire_time_;
     float shoot_compensate_pitch_;
     float shoot_compensate_yaw_;
+
+    std::vector<int64_t> enemy_priority_;
 
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -82,6 +89,8 @@ private:
     std::shared_ptr<rclcpp::Subscription<DetectionArray>> detection_sub_;
     std::shared_ptr<rclcpp::Subscription<sensor_msgs::msg::CameraInfo>> camera_info_sub_;
     std::shared_ptr<rclcpp::Subscription<DecisionInfo>> decision_info_sub_;
+    std::shared_ptr<rclcpp::Subscription<OurColor>> our_color_sub_;
+    std::shared_ptr<rclcpp::Subscription<BulletSpeed>> bullet_speed_sub_;
 
     std::shared_ptr<rclcpp::Publisher<hw_sentry_interfaces::msg::ArmorDistance>> armor_dist_pub_;
     std::shared_ptr<rclcpp::Publisher<hw_sentry_interfaces::msg::ShootPos>> shoot_pos_pub_;
@@ -110,6 +119,8 @@ PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
 void PredictionNode::get_parameters() {
     enable_print_state_ = declare_parameter("enable_print_state", false);
     enable_send_to_serial_ = declare_parameter("enable_send_to_serial", true);
+    enable_self_decision_ = declare_parameter("enable_self_decision", true);
+    enemy_priority_ = declare_parameter("enemy_priority", std::vector<int64_t>{});
     target_color_ = declare_parameter("target_color", 0);
     target_armor_ = declare_parameter("target_armor", 1);
     bullet_speed_ = declare_parameter("bullet_speed", 30.0);
@@ -118,12 +129,16 @@ void PredictionNode::get_parameters() {
     shoot_compensate_yaw_ = declare_parameter("shoot_compensate_yaw", 0.0);
 
     std::string camera_info_topic =
-        declare_parameter("camera_info_topic", "/camera/color/camera_info");
-    std::string detection_sub_topic = declare_parameter("detection_sub_topic", "/detection");
-    std::string decision_info_sub_topic = declare_parameter("decision_info_sub_topic", "/decision");
+        declare_parameter("camera_info_topic", "camera/color/camera_info");
+    std::string detection_sub_topic = declare_parameter("detection_sub_topic", "detection");
+    std::string decision_info_sub_topic = declare_parameter("decision_info_sub_topic", "decision");
+    std::string our_color_sub_topic = declare_parameter("our_color_sub_topic", "serial/our_color");
+    std::string bullet_speed_sub_topic = declare_parameter("bullet_speed_sub_topic", "serial/bullet_speed");
+
     std::string armor_distance_pub_topic =
-        declare_parameter("armor_distance_pub_topic", "/prediction/armor_distance");
-    std::string shoot_pos_pub_topic = declare_parameter("shoot_pos_pub_topic", "/serial/shoot_pos");
+        declare_parameter("armor_distance_pub_topic", "prediction/armor_distance");
+    std::string shoot_pos_pub_topic = declare_parameter("shoot_pos_pub_topic", "serial/shoot_pos");
+    
     camera_info_sub_ = create_subscription<sensor_msgs::msg::CameraInfo>(
         camera_info_topic,
         rclcpp::SensorDataQoS().keep_last(1),
@@ -137,7 +152,24 @@ void PredictionNode::get_parameters() {
     decision_info_sub_ = create_subscription<DecisionInfo>(
         decision_info_sub_topic,
         rclcpp::SensorDataQoS().keep_last(1),
-        [&](const DecisionInfo::SharedPtr msg) { decision_callback(msg); }
+        [&](const DecisionInfo::SharedPtr msg) {
+            last_decision_recv_time_ = to_sec(now());
+            target_armor_ = msg->label;
+        }
+    );
+    our_color_sub_ = create_subscription<OurColor>(
+        our_color_sub_topic,
+        rclcpp::SensorDataQoS().keep_last(1),
+        [&](const OurColor::SharedPtr msg) {
+            target_color_ = 1 - msg->our_color;
+        }
+    );
+    bullet_speed_sub_ = create_subscription<BulletSpeed>(
+        bullet_speed_sub_topic,
+        rclcpp::SensorDataQoS().keep_last(1),
+        [&](const BulletSpeed::SharedPtr msg) {
+            bullet_speed_ = msg->bullet_speed;
+        }
     );
     armor_dist_pub_ = create_publisher<hw_sentry_interfaces::msg::ArmorDistance>(
         armor_distance_pub_topic,
@@ -149,30 +181,41 @@ void PredictionNode::get_parameters() {
     );
 }
 
-void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) const {
-    // 这个thread把视野中所有装甲板的距离解算出来并发出去，用于决策
-    auto thread = std::thread([=]() {
-        hw_sentry_interfaces::msg::ArmorDistance armor_distance;
-        armor_distance.header.stamp = msg->header.stamp;
-        bool occurs[5][15] = {0};
-        if (!msg->detections.empty()) {
-            for (const auto& armor: msg->detections) {
-                if (!occurs[armor.color][armor.label]) {
-                    occurs[armor.color][armor.label] = 1;
-                    geometry_msgs::msg::Transform armor_to_cam;
-                    pnp_solver_->get_translation(armor, armor_to_cam);
-                    armor_distance.colors.emplace_back(armor.color);
-                    armor_distance.labels.emplace_back(armor.label);
-                    const float x = armor_to_cam.translation.x;
-                    const float y = armor_to_cam.translation.y;
-                    const float z = armor_to_cam.translation.z;
-                    armor_distance.distances.emplace_back(sqrt(x * x + y * y + z * z));
-                }
+void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
+    // 把视野中所有装甲板的距离解算出来并发出去，用于决策
+    hw_sentry_interfaces::msg::ArmorDistance armor_distance;
+    armor_distance.header.stamp = msg->header.stamp;
+    bool occurred_armors[5][15] = {0};
+    if (!msg->detections.empty()) {
+        for (const auto& armor: msg->detections) {
+            if (!occurred_armors[armor.color][armor.label]) {
+                occurred_armors[armor.color][armor.label] = 1;
+                geometry_msgs::msg::Transform armor_to_cam;
+                pnp_solver_->get_translation(armor, armor_to_cam);
+                armor_distance.colors.emplace_back(armor.color);
+                armor_distance.labels.emplace_back(armor.label);
+                const float x = armor_to_cam.translation.x;
+                const float y = armor_to_cam.translation.y;
+                const float z = armor_to_cam.translation.z;
+                armor_distance.distances.emplace_back(sqrt(x * x + y * y + z * z));
             }
         }
-        armor_dist_pub_->publish(armor_distance);
-    });
-    thread.detach();
+    }
+    armor_dist_pub_->publish(armor_distance);
+
+    // 连续1s没有收到决策消息，自行决策
+    if (to_sec(now()) - last_decision_recv_time_ > 1.0) { 
+        RCLCPP_ERROR_ONCE(
+            get_logger(),
+            "No decision info received in 1s. Fallback to simple decision."
+        );
+        for (const int label: enemy_priority_) {
+            if (occurred_armors[target_color_][label]) {
+                target_armor_ = label;
+                break;
+            }
+        }
+    }
 
     std::tuple<float, float, float> gimbal_ypr = 
         get_gimbal_ypr(static_cast<rclcpp::Time>(msg->header.stamp));
@@ -262,6 +305,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
         
         if (enable_print_state_) {
             tracker_->debug_print_state();
+            std::printf("Target color: %d, label %d.\n", target_color_, target_armor_);
             std::printf(
                 "Pitch: %4.1f  Yaw: %4.1f (degree)    Shoot_flag: %s\n",
                 math::r2d(target_pitch),
@@ -281,11 +325,6 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) con
             shoot_pos_pub_->publish(shoot_pos);
         }
     }
-}
-
-void PredictionNode::decision_callback(const DecisionInfo::SharedPtr msg) {
-    target_color_ = msg->color;
-    target_armor_ = msg->label;
 }
 
 void PredictionNode::camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg) {

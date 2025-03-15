@@ -16,7 +16,7 @@ Tracker:
   antitop_palstance_threshold: 1.74533 # 启用反陀螺的角速度阈值。1.74533rad/s = 100deg/s
   antitop_follow_angle: 0.4 # 小陀螺时，让yaw跟随的角度最大值。若超过则在另一边等待
   antitop_can_shoot_angle: 0.25 # 小陀螺时，shoot_flag置为true的角度最大值
-  max_lost_frames: 20 # 最大的丢失帧数。超过就从TEMP_LOST变为LOST
+  max_lost_frames: 10 # 最大的丢失帧数。超过就从TEMP_LOST变为LOST
   converge_frames: 10 # 收敛帧数。超过则从CONVERGING变为TRACKING
 
 KFXYZ:
@@ -51,7 +51,7 @@ KFYaw:
     rows: 1
     cols: 1
     dt: f
-    data: [ 1e-2 ]
+    data: [ 1e-1 ]
 
 UKFXY:
   process_noise_cov: !!opencv-matrix
