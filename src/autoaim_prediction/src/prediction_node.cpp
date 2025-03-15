@@ -16,6 +16,7 @@
 #include <hw_sentry_interfaces/msg/bullet_speed.hpp>
 
 #include <pnp_solver.hpp>
+#include <old_pnp_solver.hpp>
 #include <trisection_yaw.hpp>
 #include <tracker.hpp>
 #include <trajectory.hpp>
@@ -96,6 +97,7 @@ private:
     std::shared_ptr<rclcpp::Publisher<hw_sentry_interfaces::msg::ShootPos>> shoot_pos_pub_;
 
     std::shared_ptr<PnPSolver> pnp_solver_;
+    std::shared_ptr<OldPnPSolver> old_pnp_solver_;
     std::shared_ptr<TrisectionYaw> trisection_yaw_;
     std::shared_ptr<Tracker> tracker_;
 };
@@ -107,6 +109,7 @@ PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
     pnp_solver_ = std::make_shared<PnPSolver>();
+    old_pnp_solver_ = std::make_shared<OldPnPSolver>();
     trisection_yaw_ = std::make_shared<TrisectionYaw>();
     std::string tracker_params_path =
         ament_index_cpp::get_package_share_directory("autoaim_prediction")
@@ -168,7 +171,9 @@ void PredictionNode::get_parameters() {
         bullet_speed_sub_topic,
         rclcpp::SensorDataQoS().keep_last(1),
         [&](const BulletSpeed::SharedPtr msg) {
-            bullet_speed_ = msg->bullet_speed;
+            if (23 <= msg->bullet_speed && msg->bullet_speed <= 25) {
+                bullet_speed_ = msg->bullet_speed;
+            }
         }
     );
     armor_dist_pub_ = create_publisher<hw_sentry_interfaces::msg::ArmorDistance>(
@@ -232,8 +237,9 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
         armor_to_cam.header.frame_id = "autoaim_camera";
         armor_to_cam.child_frame_id = armor_name;
         // 计算装甲板相对于相机坐标系的位姿
-        pnp_solver_->get_translation(armor, armor_to_cam.transform);
-        trisection_yaw_->get_rotation(armor, armor_to_cam.transform, gimbal_ypr);
+        // pnp_solver_->get_translation(armor, armor_to_cam.transform);
+        // trisection_yaw_->get_rotation(armor, armor_to_cam.transform, gimbal_ypr);
+        old_pnp_solver_->solve_pnp(armor, armor_to_cam, gimbal_ypr);
         tf_broadcaster_->sendTransform(armor_to_cam);
         // 把装甲板的位姿转换到世界坐标系下进行滤波
         try {
@@ -305,7 +311,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
         
         if (enable_print_state_) {
             tracker_->debug_print_state();
-            std::printf("Target color: %d, label %d.\n", target_color_, target_armor_);
+            std::printf("Target color %d, label %d\n", target_color_, target_armor_);
             std::printf(
                 "Pitch: %4.1f  Yaw: %4.1f (degree)    Shoot_flag: %s\n",
                 math::r2d(target_pitch),
@@ -313,13 +319,13 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
                 (can_shoot ? "true" : "false")
             );
         }
-        if (enable_send_to_serial_ && tracker_->tracker_status != TRACKER_STATUS::TEMP_LOST) {
+        if (enable_send_to_serial_) {
             hw_sentry_interfaces::msg::ShootPos shoot_pos;
             shoot_pos.header.stamp = msg->header.stamp;
             // 发送给电控的shoot_flag中，0是不发弹，1是单发，2是连发。
             // 一般打人用连发，打符用单发。
             shoot_pos.shoot_flag = 
-                (can_shoot ? 2 : 0) && (tracker_->tracker_status == TRACKER_STATUS::TRACKING);
+                (can_shoot ? 2 : 0) && (tracker_->tracker_status != TRACKER_STATUS::CONVERGING);
             shoot_pos.pitch = target_pitch;
             shoot_pos.yaw = target_yaw;
             shoot_pos_pub_->publish(shoot_pos);
@@ -329,6 +335,10 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
 
 void PredictionNode::camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg) {
     pnp_solver_->set_cam_matrix(
+        cv::Mat(3, 3, CV_64F, msg->k.data()),
+        cv::Mat(1, 5, CV_64F, msg->d.data())
+    );
+    old_pnp_solver_->set_cam_matrix(
         cv::Mat(3, 3, CV_64F, msg->k.data()),
         cv::Mat(1, 5, CV_64F, msg->d.data())
     );

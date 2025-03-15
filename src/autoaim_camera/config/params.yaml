@@ -5,7 +5,7 @@
     enable_imu_trigger: false # 是否启用硬触发
 
     frame_rate: 100.0 # 仅在连续触发模式生效
-    exposure: 800.0
+    exposure: 2000.0
     gain: 16.0
 
     img_pub_topic: "camera/color/image_raw" # 发布的topic名字

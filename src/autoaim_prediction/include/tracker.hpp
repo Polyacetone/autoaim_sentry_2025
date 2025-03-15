@@ -173,20 +173,20 @@ std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
     const float img_to_fire_time
 ) {
     if (abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD) { // 平动，只用KFXYZ预测
-        // 理论上来说要精确求出这里的击打时间需要解一个方程，这里为了简化直接采用一阶近似
-        // img_to_hit_time = img_to_fire_time + fire_to_hit_time
-        const float img_to_hit_time = img_to_fire_time
-            + math::get_distance(kf_xyz_->position + img_to_fire_time * kf_xyz_->velocity) / bullet_speed;
+        // 理论上来说要精确求出这里的击打时间需要解一个方程，这里为了简化直接采用二阶近似
+        const float img_to_hit_time_1 = math::get_distance(kf_xyz_->position) / bullet_speed;
+        const float img_to_hit_time_2 = img_to_fire_time +
+            math::get_distance(kf_xyz_->position + img_to_hit_time_1 * kf_xyz_->velocity) / bullet_speed;
         // 平动时，总是能开火
-        return std::make_tuple(kf_xyz_->position + img_to_hit_time * kf_xyz_->velocity, true);
+        return std::make_tuple(kf_xyz_->position + img_to_hit_time_2 * kf_xyz_->velocity, true);
     } else { // 转动，用KFYaw和UKFXY预测
-        // 同上，img_to_hit_time为一阶近似
-        // img_to_hit_time = img_to_fire_time + fire_to_hit_time
-        const float img_to_hit_time = img_to_fire_time
-            + math::get_distance(ukf_->position + img_to_fire_time * ukf_->velocity) / bullet_speed;
-        const cv::Point2f pred_center = ukf_->position + ukf_->velocity * img_to_hit_time;
+        // 同上，img_to_hit_time为二阶近似
+        const float img_to_hit_time_1 = math::get_distance(ukf_->position) / bullet_speed;
+        const float img_to_hit_time_2 = img_to_fire_time +
+            math::get_distance(ukf_->position + img_to_hit_time_1 * ukf_->velocity) / bullet_speed;
+        const cv::Point2f pred_center = ukf_->position + ukf_->velocity * img_to_hit_time_2;
         // 0号装甲板在世界系下的预测yaw角
-        const float pred_yaw_to_world = kf_yaw_->yaw + kf_yaw_->palstance * img_to_hit_time;
+        const float pred_yaw_to_world = kf_yaw_->yaw + kf_yaw_->palstance * img_to_hit_time_2;
         // 0号装甲板在gimbal系下的预测yaw角
         const float pred_yaw_to_gimbal = math::rad_period_correction(pred_yaw_to_world - gimbal_yaw);
         float target_angle_to_gimbal = M_PI / 2; // 最面向我们的装甲板在gimbal系下的预测角
@@ -200,7 +200,7 @@ std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
                 target_armor_index = (observing_armor_id_ + i) % 2;
             }
         }
-        if (abs(target_angle_to_gimbal) < ANTITOP_FOLLOW_ANGLE) { // 跟随射击
+        /*if (abs(target_angle_to_gimbal) < ANTITOP_FOLLOW_ANGLE) { // 跟随射击
             const float target_angle_to_world = 
                 math::rad_period_correction(target_angle_to_gimbal + gimbal_yaw);
             const cv::Point3f target = cv::Point3f(
@@ -220,7 +220,15 @@ std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
                 height_[1 - target_armor_index]
             );
             return std::make_tuple(target, false);
-        }
+        }*/
+        const cv::Point3f target = cv::Point3f(
+            pred_center.x,
+            pred_center.y,
+            height_[target_armor_index]
+        );
+        const float target_angle_to_world = 
+            math::rad_period_correction(target_angle_to_gimbal + gimbal_yaw);
+        return std::make_tuple(target, true);
     }
 }
 
