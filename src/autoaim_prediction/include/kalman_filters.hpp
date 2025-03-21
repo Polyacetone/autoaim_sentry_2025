@@ -113,6 +113,12 @@ public:
         update_output();
     }
 
+    // 强制更新状态量
+    void force_change_yaw(const float meas) {
+        x_(0) = meas;
+        update_output();
+    }
+
     float yaw, palstance;
 
 private:

@@ -5,8 +5,6 @@
 #include "cv_bridge/cv_bridge.h"
 #include <hw_sentry_interfaces/msg/detection_array.hpp>
 
-#include <check_armor.hpp>
-
 struct Config {
     std::string model_path;
     float conf_threshold;

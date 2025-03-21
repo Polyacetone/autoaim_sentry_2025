@@ -1,8 +1,8 @@
 /**:
   ros__parameters:
-    image_topic: "camera/color/image_raw"
-    detection_topic: "detection"
-    image_detected_topic: "debug/detected_image"
+    image_topic: "autoaim/camera/image_raw"
+    detection_topic: "autoaim/detection"
+    image_detected_topic: "autoaim/detected_image"
 
     model_path: "20250313v11.xml"
     confidence_threshold: 0.4

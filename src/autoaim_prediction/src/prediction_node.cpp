@@ -11,22 +11,21 @@
 #include <hw_sentry_interfaces/msg/detection_array.hpp>
 #include <hw_sentry_interfaces/msg/armor_distance.hpp>
 #include <hw_sentry_interfaces/msg/shoot_pos.hpp>
-#include <hw_sentry_interfaces/msg/decision_info.hpp>
-#include <hw_sentry_interfaces/msg/our_color.hpp>
+#include <hw_sentry_interfaces/msg/decision_target.hpp>
+#include <hw_sentry_interfaces/msg/robot_color.hpp>
 #include <hw_sentry_interfaces/msg/bullet_speed.hpp>
 
 #include <pnp_solver.hpp>
-#include <old_pnp_solver.hpp>
 #include <trisection_yaw.hpp>
 #include <tracker.hpp>
 #include <trajectory.hpp>
 
 namespace autoaim_prediction {
-using hw_sentry_interfaces::msg::DecisionInfo;
+using hw_sentry_interfaces::msg::DecisionTarget;
 using hw_sentry_interfaces::msg::Detection;
 using hw_sentry_interfaces::msg::DetectionArray;
 using hw_sentry_interfaces::msg::BulletSpeed;
-using hw_sentry_interfaces::msg::OurColor;
+using hw_sentry_interfaces::msg::RobotColor;
 
 const geometry_msgs::msg::Transform EMPTY_TRANSFORM;
 
@@ -55,7 +54,7 @@ private:
     void camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg);
 
     // 选择目标颜色和标签的装甲板，并按照一定规则进行排序
-    void select_armors(const std::vector<Detection> src, std::vector<Detection>& dst) const;
+    void select_armors(const std::vector<Detection>& src, std::vector<Detection>& dst) const;
 
     // 尝试获取指定时间点对应的变换。若尝试MAX_ATTEMPTS后仍没有找到，throw一个std::runtime_error
     geometry_msgs::msg::Transform try_get_transform(
@@ -89,15 +88,14 @@ private:
 
     std::shared_ptr<rclcpp::Subscription<DetectionArray>> detection_sub_;
     std::shared_ptr<rclcpp::Subscription<sensor_msgs::msg::CameraInfo>> camera_info_sub_;
-    std::shared_ptr<rclcpp::Subscription<DecisionInfo>> decision_info_sub_;
-    std::shared_ptr<rclcpp::Subscription<OurColor>> our_color_sub_;
+    std::shared_ptr<rclcpp::Subscription<DecisionTarget>> decision_target_sub_;
+    std::shared_ptr<rclcpp::Subscription<RobotColor>> robot_color_sub_;
     std::shared_ptr<rclcpp::Subscription<BulletSpeed>> bullet_speed_sub_;
 
     std::shared_ptr<rclcpp::Publisher<hw_sentry_interfaces::msg::ArmorDistance>> armor_dist_pub_;
     std::shared_ptr<rclcpp::Publisher<hw_sentry_interfaces::msg::ShootPos>> shoot_pos_pub_;
 
     std::shared_ptr<PnPSolver> pnp_solver_;
-    std::shared_ptr<OldPnPSolver> old_pnp_solver_;
     std::shared_ptr<TrisectionYaw> trisection_yaw_;
     std::shared_ptr<Tracker> tracker_;
 };
@@ -109,7 +107,6 @@ PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
     pnp_solver_ = std::make_shared<PnPSolver>();
-    old_pnp_solver_ = std::make_shared<OldPnPSolver>();
     trisection_yaw_ = std::make_shared<TrisectionYaw>();
     std::string tracker_params_path =
         ament_index_cpp::get_package_share_directory("autoaim_prediction")
@@ -128,14 +125,14 @@ void PredictionNode::get_parameters() {
     target_armor_ = declare_parameter("target_armor", 1);
     bullet_speed_ = declare_parameter("bullet_speed", 30.0);
     control_to_fire_time_ = declare_parameter("control_to_fire_time", 0.098);
-    shoot_compensate_pitch_ = declare_parameter("shoot_compensate_pitch", 0.0);
-    shoot_compensate_yaw_ = declare_parameter("shoot_compensate_yaw", 0.0);
+    shoot_compensate_pitch_ = math::d2r(declare_parameter("shoot_compensate_pitch", 0.0));
+    shoot_compensate_yaw_ = math::d2r(declare_parameter("shoot_compensate_yaw", 0.0));
 
     std::string camera_info_topic =
         declare_parameter("camera_info_topic", "camera/color/camera_info");
     std::string detection_sub_topic = declare_parameter("detection_sub_topic", "detection");
-    std::string decision_info_sub_topic = declare_parameter("decision_info_sub_topic", "decision");
-    std::string our_color_sub_topic = declare_parameter("our_color_sub_topic", "serial/our_color");
+    std::string decision_target_sub_topic = declare_parameter("decision_target_sub_topic", "decision");
+    std::string robot_color_sub_topic = declare_parameter("robot_color_sub_topic", "serial/robot_color");
     std::string bullet_speed_sub_topic = declare_parameter("bullet_speed_sub_topic", "serial/bullet_speed");
 
     std::string armor_distance_pub_topic =
@@ -152,19 +149,19 @@ void PredictionNode::get_parameters() {
         rclcpp::SensorDataQoS().keep_last(1),
         [&](const DetectionArray::SharedPtr msg) { detection_callback(msg); }
     );
-    decision_info_sub_ = create_subscription<DecisionInfo>(
-        decision_info_sub_topic,
+    decision_target_sub_ = create_subscription<DecisionTarget>(
+        decision_target_sub_topic,
         rclcpp::SensorDataQoS().keep_last(1),
-        [&](const DecisionInfo::SharedPtr msg) {
+        [&](const DecisionTarget::SharedPtr msg) {
             last_decision_recv_time_ = to_sec(now());
             target_armor_ = msg->label;
         }
     );
-    our_color_sub_ = create_subscription<OurColor>(
-        our_color_sub_topic,
+    robot_color_sub_ = create_subscription<RobotColor>(
+        robot_color_sub_topic,
         rclcpp::SensorDataQoS().keep_last(1),
-        [&](const OurColor::SharedPtr msg) {
-            target_color_ = 1 - msg->our_color;
+        [&](const RobotColor::SharedPtr msg) {
+            target_color_ = 1 - msg->robot_color;
         }
     );
     bullet_speed_sub_ = create_subscription<BulletSpeed>(
@@ -237,9 +234,9 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
         armor_to_cam.header.frame_id = "autoaim_camera";
         armor_to_cam.child_frame_id = armor_name;
         // 计算装甲板相对于相机坐标系的位姿
-        // pnp_solver_->get_translation(armor, armor_to_cam.transform);
-        // trisection_yaw_->get_rotation(armor, armor_to_cam.transform, gimbal_ypr);
-        old_pnp_solver_->solve_pnp(armor, armor_to_cam, gimbal_ypr);
+        pnp_solver_->get_translation(armor, armor_to_cam.transform);
+        trisection_yaw_->get_rotation(armor, armor_to_cam.transform, gimbal_ypr);
+        // old_pnp_solver_->solve_pnp(armor, armor_to_cam, gimbal_ypr);
         tf_broadcaster_->sendTransform(armor_to_cam);
         // 把装甲板的位姿转换到世界坐标系下进行滤波
         try {
@@ -266,7 +263,6 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
             gimbal_yaw,
             bullet_speed_,
             to_sec(now()) - to_sec(msg->header.stamp) + control_to_fire_time_
-            // img_to_fire_time = img_to_control_time + control_to_fire_time
         );
 
         geometry_msgs::msg::TransformStamped target_to_chassis;
@@ -301,13 +297,13 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
             target_to_fric.translation.y,
             target_to_fric.translation.z,
             bullet_speed_
-        ) + math::d2r(shoot_compensate_pitch_);
+        ) - shoot_compensate_pitch_;
         const float target_yaw = math::rad_period_correction(
             atan2(
                 target_to_fric.translation.y,
                 target_to_fric.translation.x
             )
-        ) + math::d2r(shoot_compensate_yaw_);
+        ) + shoot_compensate_yaw_;
         
         if (enable_print_state_) {
             tracker_->debug_print_state();
@@ -324,8 +320,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
             shoot_pos.header.stamp = msg->header.stamp;
             // 发送给电控的shoot_flag中，0是不发弹，1是单发，2是连发。
             // 一般打人用连发，打符用单发。
-            shoot_pos.shoot_flag = 
-                (can_shoot ? 2 : 0) && (tracker_->tracker_status != TRACKER_STATUS::CONVERGING);
+            shoot_pos.shoot_flag = can_shoot ? 2 : 0;
             shoot_pos.pitch = target_pitch;
             shoot_pos.yaw = target_yaw;
             shoot_pos_pub_->publish(shoot_pos);
@@ -338,10 +333,6 @@ void PredictionNode::camera_info_callback(const sensor_msgs::msg::CameraInfo::Sh
         cv::Mat(3, 3, CV_64F, msg->k.data()),
         cv::Mat(1, 5, CV_64F, msg->d.data())
     );
-    old_pnp_solver_->set_cam_matrix(
-        cv::Mat(3, 3, CV_64F, msg->k.data()),
-        cv::Mat(1, 5, CV_64F, msg->d.data())
-    );
     trisection_yaw_->set_cam_matrix(
         cv::Mat(3, 3, CV_64F, msg->k.data()),
         cv::Mat(1, 5, CV_64F, msg->d.data())
@@ -351,19 +342,23 @@ void PredictionNode::camera_info_callback(const sensor_msgs::msg::CameraInfo::Sh
     camera_info_sub_ = nullptr;
 }
 
-void PredictionNode::select_armors(const std::vector<Detection> src, std::vector<Detection>& dst) const {
+void PredictionNode::select_armors(const std::vector<Detection>& src, std::vector<Detection>& dst) const {
     constexpr auto get_center_x = [](const Detection& d) -> int {
         return (d.bl.x + d.br.x + d.tr.x + d.tl.x) / 4;
     };
     constexpr auto get_area = [](const Detection& d) -> int {
         return (d.br.x - d.tl.x) * (d.br.y - d.tl.y);
     };
+    constexpr auto get_length_height_ratio = [](const Detection& d) -> float {
+        return fabs((d.tl.x + d.bl.x - d.tr.x - d.br.x) / (d.tl.y + d.tr.y - d.bl.y - d.br.y));
+    };
     static int center_x_prev = 0;
-
     std::vector<Detection> filtered;
     // 筛选出目标颜色和标签的装甲板
     for (const auto& armor: src) {
-        if (armor.label == target_armor_) {
+        // 用装甲板长宽比筛掉太斜的装甲板
+        const bool yaw_too_large = get_length_height_ratio(armor) < (armor.label == 1 ? 2.0 : 1.6);
+        if (!yaw_too_large && armor.label == target_armor_) {
             if (target_color_ == armor.color) {
                 filtered.emplace_back(armor);
             } else if (armor.color == 2) { // 特殊处理灰色装甲板

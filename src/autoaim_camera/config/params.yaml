@@ -8,5 +8,5 @@
     exposure: 2000.0
     gain: 16.0
 
-    img_pub_topic: "camera/color/image_raw" # 发布的topic名字
+    img_pub_topic: "autoaim/camera/image_raw" # 发布的topic名字
     camera_info_url: "package://autoaim_camera/config/camera_info.yaml" # 相机参数的url
