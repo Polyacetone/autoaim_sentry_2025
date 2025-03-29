@@ -113,7 +113,6 @@ void Tracker::update(const double time_stamp) {
     } else {
         lost_frames_ = 0;
         tracking_frames_++;
-        static float prev_angle;
         if (tracker_status == TS::LOST) { // 初始化
             kf_xyz_->initialize(armors_[0].center);
             kf_yaw_->initialize(armors_[0].angle);
@@ -129,13 +128,17 @@ void Tracker::update(const double time_stamp) {
             kf_xyz_->predict(time_elapsed);
             kf_yaw_->predict(time_elapsed);
             ukf_->predict(time_elapsed);
-            const float delta_angle = math::rad_period_correction(armors_[0].angle - prev_angle);
-            if (delta_angle < -SWITCH_ARMOR_ANGLE) { // 逆时针转（角速度大于0）时切换装甲板
+            if (armors_[0].angle - kf_yaw_->yaw > M_PI) {
+                armors_[0].angle -= M_PI * 2;
+            } else if (armors_[0].angle - kf_yaw_->yaw < -M_PI) {
+                armors_[0].angle += M_PI * 2;
+            }
+            if (armors_[0].angle - kf_yaw_->yaw < -SWITCH_ARMOR_ANGLE) { // 逆时针转（角速度大于0）时切换装甲板
                 observing_armor_id_++;
                 observing_armor_id_ %= 4;
                 kf_yaw_->force_change_yaw(armors_[0].angle);
                 kf_xyz_->force_change_position(armors_[0].center);
-            } else if (delta_angle > SWITCH_ARMOR_ANGLE) { // 顺时针转（角速度小于0）时切换装甲板
+            } else if (armors_[0].angle - kf_yaw_->yaw > SWITCH_ARMOR_ANGLE) { // 顺时针转（角速度小于0）时切换装甲板
                 observing_armor_id_ += 3;
                 observing_armor_id_ %= 4;
                 kf_yaw_->force_change_yaw(armors_[0].angle);
@@ -156,7 +159,6 @@ void Tracker::update(const double time_stamp) {
         } else {
             tracker_status = TS::CONVERGING;
         }
-        prev_angle = armors_[0].angle;
     }
     
     armors_.clear();

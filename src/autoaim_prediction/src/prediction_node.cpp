@@ -9,10 +9,10 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
 #include <hw_sentry_interfaces/msg/detection_array.hpp>
-#include <hw_sentry_interfaces/msg/armor_distance.hpp>
 #include <hw_sentry_interfaces/msg/shoot_pos.hpp>
-#include <hw_sentry_interfaces/msg/decision_target.hpp>
 #include <hw_sentry_interfaces/msg/robot_color.hpp>
+#include <hw_sentry_interfaces/msg/enemy_priority.hpp>
+#include <hw_sentry_interfaces/msg/comp_robots_hp.hpp>
 #include <hw_sentry_interfaces/msg/bullet_speed.hpp>
 
 #include <pnp_solver.hpp>
@@ -21,11 +21,14 @@
 #include <trajectory.hpp>
 
 namespace autoaim_prediction {
-using hw_sentry_interfaces::msg::DecisionTarget;
+using hw_sentry_interfaces::msg::BulletSpeed;
+using hw_sentry_interfaces::msg::CompRobotsHp;
 using hw_sentry_interfaces::msg::Detection;
 using hw_sentry_interfaces::msg::DetectionArray;
-using hw_sentry_interfaces::msg::BulletSpeed;
+using hw_sentry_interfaces::msg::EnemyPriority;
 using hw_sentry_interfaces::msg::RobotColor;
+using hw_sentry_interfaces::msg::ShootPos;
+using sensor_msgs::msg::CameraInfo;
 
 const geometry_msgs::msg::Transform EMPTY_TRANSFORM;
 
@@ -51,7 +54,13 @@ public:
 private:
     void get_parameters();
     void detection_callback(const DetectionArray::SharedPtr msg);
-    void camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg);
+    void camera_info_callback(const CameraInfo::SharedPtr msg);
+
+    // 接收机器人血量数据，更新is_enemy_can_shoot，用于筛去死掉或无敌的人
+    void robots_hp_callback(const CompRobotsHp::SharedPtr msg);
+
+    // 找出所有视野里的敌人，按照优先级和是否能打（不打死人和无敌），设置目标敌人编号
+    void decide_target_armor(const DetectionArray::SharedPtr msg);
 
     // 选择目标颜色和标签的装甲板，并按照一定规则进行排序
     void select_armors(const std::vector<Detection>& src, std::vector<Detection>& dst) const;
@@ -71,29 +80,29 @@ private:
     bool enable_send_to_serial_;
     bool enable_self_decision_;
 
-    int target_color_;
-    int target_armor_;
+    int target_color_ = -1;
+    int target_armor_ = -1;
     float bullet_speed_;
-    double last_decision_recv_time_ = 0;
 
     float control_to_fire_time_;
     float shoot_compensate_pitch_;
     float shoot_compensate_yaw_;
 
-    std::vector<int64_t> enemy_priority_;
+    std::vector<int> enemy_priority_;
+    bool is_enemy_can_shoot_[10] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
 
     std::shared_ptr<rclcpp::Subscription<DetectionArray>> detection_sub_;
-    std::shared_ptr<rclcpp::Subscription<sensor_msgs::msg::CameraInfo>> camera_info_sub_;
-    std::shared_ptr<rclcpp::Subscription<DecisionTarget>> decision_target_sub_;
+    std::shared_ptr<rclcpp::Subscription<CameraInfo>> camera_info_sub_;
     std::shared_ptr<rclcpp::Subscription<RobotColor>> robot_color_sub_;
     std::shared_ptr<rclcpp::Subscription<BulletSpeed>> bullet_speed_sub_;
+    std::shared_ptr<rclcpp::Subscription<EnemyPriority>> enemy_priority_sub_;
+    std::shared_ptr<rclcpp::Subscription<CompRobotsHp>> robots_hp_sub_;
 
-    std::shared_ptr<rclcpp::Publisher<hw_sentry_interfaces::msg::ArmorDistance>> armor_dist_pub_;
-    std::shared_ptr<rclcpp::Publisher<hw_sentry_interfaces::msg::ShootPos>> shoot_pos_pub_;
+    std::shared_ptr<rclcpp::Publisher<ShootPos>> shoot_pos_pub_;
 
     std::shared_ptr<PnPSolver> pnp_solver_;
     std::shared_ptr<TrisectionYaw> trisection_yaw_;
@@ -120,110 +129,74 @@ void PredictionNode::get_parameters() {
     enable_print_state_ = declare_parameter("enable_print_state", false);
     enable_send_to_serial_ = declare_parameter("enable_send_to_serial", true);
     enable_self_decision_ = declare_parameter("enable_self_decision", true);
-    enemy_priority_ = declare_parameter("enemy_priority", std::vector<int64_t>{});
+    auto enemy_priority_int64 = declare_parameter("enemy_priority", std::vector<int64_t> {0, 1, 2, 3, 4});
+    for (const auto item: enemy_priority_int64) {
+        enemy_priority_.emplace_back(static_cast<int>(item));
+    }
     target_color_ = declare_parameter("target_color", 0);
-    target_armor_ = declare_parameter("target_armor", 1);
     bullet_speed_ = declare_parameter("bullet_speed", 30.0);
     control_to_fire_time_ = declare_parameter("control_to_fire_time", 0.098);
     shoot_compensate_pitch_ = math::d2r(declare_parameter("shoot_compensate_pitch", 0.0));
     shoot_compensate_yaw_ = math::d2r(declare_parameter("shoot_compensate_yaw", 0.0));
 
-    std::string camera_info_topic =
-        declare_parameter("camera_info_topic", "camera/color/camera_info");
+    std::string camera_info_topic = declare_parameter("camera_info_topic", "camera/color/camera_info");
     std::string detection_sub_topic = declare_parameter("detection_sub_topic", "detection");
     std::string decision_target_sub_topic = declare_parameter("decision_target_sub_topic", "decision");
     std::string robot_color_sub_topic = declare_parameter("robot_color_sub_topic", "serial/robot_color");
     std::string bullet_speed_sub_topic = declare_parameter("bullet_speed_sub_topic", "serial/bullet_speed");
+    std::string enemy_priority_sub_topic = declare_parameter("enemy_priority_sub_topic", "decision/enemy_priority");
+    std::string robots_hp_sub_topic = declare_parameter("robots_hp_topic", "serial/comp_robots_hp");
 
-    std::string armor_distance_pub_topic =
-        declare_parameter("armor_distance_pub_topic", "prediction/armor_distance");
+    std::string armor_distance_pub_topic = declare_parameter("armor_distance_pub_topic", "prediction/armor_distance");
     std::string shoot_pos_pub_topic = declare_parameter("shoot_pos_pub_topic", "serial/shoot_pos");
-    
-    camera_info_sub_ = create_subscription<sensor_msgs::msg::CameraInfo>(
+
+    camera_info_sub_ = create_subscription<CameraInfo>(
         camera_info_topic,
         rclcpp::SensorDataQoS().keep_last(1),
-        [&](const sensor_msgs::msg::CameraInfo::SharedPtr msg) { camera_info_callback(msg); }
+        [&](const CameraInfo::SharedPtr msg) { camera_info_callback(msg); }
     );
     detection_sub_ = create_subscription<DetectionArray>(
         detection_sub_topic,
         rclcpp::SensorDataQoS().keep_last(1),
         [&](const DetectionArray::SharedPtr msg) { detection_callback(msg); }
     );
-    decision_target_sub_ = create_subscription<DecisionTarget>(
-        decision_target_sub_topic,
-        rclcpp::SensorDataQoS().keep_last(1),
-        [&](const DecisionTarget::SharedPtr msg) {
-            last_decision_recv_time_ = to_sec(now());
-            target_armor_ = msg->label;
-        }
-    );
     robot_color_sub_ = create_subscription<RobotColor>(
         robot_color_sub_topic,
-        rclcpp::SensorDataQoS().keep_last(1),
+        rclcpp::QoS(3),
         [&](const RobotColor::SharedPtr msg) {
+            // 需要做一个处理避免裁判系统乱发东西吗？
             target_color_ = 1 - msg->robot_color;
         }
     );
     bullet_speed_sub_ = create_subscription<BulletSpeed>(
         bullet_speed_sub_topic,
-        rclcpp::SensorDataQoS().keep_last(1),
+        rclcpp::QoS(3),
         [&](const BulletSpeed::SharedPtr msg) {
             if (23 <= msg->bullet_speed && msg->bullet_speed <= 25) {
-                bullet_speed_ = msg->bullet_speed;
+                // 对弹速进行惯性滤波
+                bullet_speed_ = 0.5 * msg->bullet_speed + 0.5 * bullet_speed_;
             }
         }
     );
-    armor_dist_pub_ = create_publisher<hw_sentry_interfaces::msg::ArmorDistance>(
-        armor_distance_pub_topic,
-        rclcpp::SensorDataQoS().keep_last(1)
+    enemy_priority_sub_ = create_subscription<EnemyPriority>(
+        enemy_priority_sub_topic,
+        rclcpp::QoS(3),
+        [&](const EnemyPriority::SharedPtr msg) { enemy_priority_ = msg->enemy_priority; }
     );
-    shoot_pos_pub_ = create_publisher<hw_sentry_interfaces::msg::ShootPos>(
-        shoot_pos_pub_topic,
-        rclcpp::SensorDataQoS().keep_last(1)
+    robots_hp_sub_ = create_subscription<CompRobotsHp>(
+        robots_hp_sub_topic,
+        rclcpp::QoS(3),
+        [&](const CompRobotsHp::SharedPtr msg) { robots_hp_callback(msg); }
     );
+    shoot_pos_pub_ = create_publisher<ShootPos>(shoot_pos_pub_topic, rclcpp::SensorDataQoS().keep_last(1));
 }
 
 void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
-    // 把视野中所有装甲板的距离解算出来并发出去，用于决策
-    hw_sentry_interfaces::msg::ArmorDistance armor_distance;
-    armor_distance.header.stamp = msg->header.stamp;
-    bool occurred_armors[5][15] = {0};
-    if (!msg->detections.empty()) {
-        for (const auto& armor: msg->detections) {
-            if (!occurred_armors[armor.color][armor.label]) {
-                occurred_armors[armor.color][armor.label] = 1;
-                geometry_msgs::msg::Transform armor_to_cam;
-                pnp_solver_->get_translation(armor, armor_to_cam);
-                armor_distance.colors.emplace_back(armor.color);
-                armor_distance.labels.emplace_back(armor.label);
-                const float x = armor_to_cam.translation.x;
-                const float y = armor_to_cam.translation.y;
-                const float z = armor_to_cam.translation.z;
-                armor_distance.distances.emplace_back(sqrt(x * x + y * y + z * z));
-            }
-        }
-    }
-    armor_dist_pub_->publish(armor_distance);
-
-    // 连续1s没有收到决策消息，自行决策
-    if (to_sec(now()) - last_decision_recv_time_ > 1.0) { 
-        RCLCPP_ERROR_ONCE(
-            get_logger(),
-            "No decision info received in 1s. Fallback to simple decision."
-        );
-        for (const int label: enemy_priority_) {
-            if (occurred_armors[target_color_][label]) {
-                target_armor_ = label;
-                break;
-            }
-        }
-    }
-
-    std::tuple<float, float, float> gimbal_ypr = 
-        get_gimbal_ypr(static_cast<rclcpp::Time>(msg->header.stamp));
+    std::tuple<float, float, float> gimbal_ypr = get_gimbal_ypr(msg->header.stamp);
     float gimbal_yaw, gimbal_pitch, gimbal_roll;
     std::tie(gimbal_yaw, gimbal_pitch, gimbal_roll) = gimbal_ypr;
     std::vector<Detection> target_armors;
+    decide_target_armor(msg);
     select_armors(msg->detections, target_armors);
     const int len = target_armors.size();
     for (int i = 0; i < len; i++) {
@@ -236,15 +209,10 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
         // 计算装甲板相对于相机坐标系的位姿
         pnp_solver_->get_translation(armor, armor_to_cam.transform);
         trisection_yaw_->get_rotation(armor, armor_to_cam.transform, gimbal_ypr);
-        // old_pnp_solver_->solve_pnp(armor, armor_to_cam, gimbal_ypr);
         tf_broadcaster_->sendTransform(armor_to_cam);
         // 把装甲板的位姿转换到世界坐标系下进行滤波
         try {
-            auto armor_to_chassis = try_get_transform(
-                "chassis",
-                armor_name,
-                msg->header.stamp
-            );
+            auto armor_to_chassis = try_get_transform("chassis", armor_name, msg->header.stamp);
             tracker_->push(armor_to_chassis);
         } catch (const std::exception& ex) {
             RCLCPP_WARN(
@@ -277,11 +245,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
         geometry_msgs::msg::Transform target_to_fric;
         try {
             // fake_fric是原点在摩擦轮系，但方向和大yaw相同的系。解出来的角度方便控车
-            target_to_fric = try_get_transform(
-                "fake_fric",
-                "target",
-                msg->header.stamp
-            );
+            target_to_fric = try_get_transform("fake_fric", "target", msg->header.stamp);
         } catch (const std::exception& ex) {
             RCLCPP_WARN(
                 get_logger(),
@@ -304,7 +268,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
                 target_to_fric.translation.x
             )
         ) + shoot_compensate_yaw_;
-        
+
         if (enable_print_state_) {
             tracker_->debug_print_state();
             std::printf("Target color %d, label %d\n", target_color_, target_armor_);
@@ -316,7 +280,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
             );
         }
         if (enable_send_to_serial_) {
-            hw_sentry_interfaces::msg::ShootPos shoot_pos;
+            ShootPos shoot_pos;
             shoot_pos.header.stamp = msg->header.stamp;
             // 发送给电控的shoot_flag中，0是不发弹，1是单发，2是连发。
             // 一般打人用连发，打符用单发。
@@ -328,18 +292,48 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
     }
 }
 
-void PredictionNode::camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg) {
-    pnp_solver_->set_cam_matrix(
-        cv::Mat(3, 3, CV_64F, msg->k.data()),
-        cv::Mat(1, 5, CV_64F, msg->d.data())
-    );
-    trisection_yaw_->set_cam_matrix(
-        cv::Mat(3, 3, CV_64F, msg->k.data()),
-        cv::Mat(1, 5, CV_64F, msg->d.data())
-    );
-    // 相机内参和畸变在运行中不会改变，所以设置后即可取消camera_info订阅
-    camera_info_sub_.reset();
-    camera_info_sub_ = nullptr;
+void PredictionNode::decide_target_armor(const DetectionArray::SharedPtr msg) {
+    static int current_target_lost_frames = 0;
+    static int armor_appear_frames[5][15] = {0};
+    bool occurred_armors[5][15] = {0};
+    if (!msg->detections.empty()) {
+        for (const auto& armor: msg->detections) {
+            occurred_armors[armor.color][armor.label] = 1;
+        }
+    }
+    for (int i = 0; i < 5; i++) {
+        for (int j = 0; j < 15; j++) {
+            if (occurred_armors[i][j]) {
+                armor_appear_frames[i][j]++;
+            } else {
+                armor_appear_frames[i][j] = 0;
+            }
+        }
+    }
+    if (target_armor_ != -1) {
+        if (!occurred_armors[target_color_][target_armor_] && !occurred_armors[2][target_armor_]) {
+            current_target_lost_frames++;
+        } else {
+            current_target_lost_frames = 0;
+        }
+    }
+
+    for (const int label: enemy_priority_) {
+        if (label == target_armor_) {
+            if (is_enemy_can_shoot_[label] && current_target_lost_frames <= 10) {
+                return;
+            }
+        } else {
+            if (is_enemy_can_shoot_[label] && armor_appear_frames[target_color_][label] > 10) {
+                target_armor_ = label;
+                current_target_lost_frames = 0;
+                tracker_->tracker_status = TRACKER_STATUS::LOST;
+                return;
+            }
+        }
+    }
+
+    target_armor_ = -1;
 }
 
 void PredictionNode::select_armors(const std::vector<Detection>& src, std::vector<Detection>& dst) const {
@@ -364,8 +358,6 @@ void PredictionNode::select_armors(const std::vector<Detection>& src, std::vecto
             } else if (armor.color == 2) { // 特殊处理灰色装甲板
                 if (abs(get_center_x(armor) - center_x_prev) <= 15) {
                     // 这里只根据灰色装甲板位置与上次瞄的位置差判断是否是被打成灰的
-                    // 理论上需要累计计数判断是被打死了还是暂时灰色
-                    // 不过哨兵决策应该会确保自瞄不会对着死人爽打，所以这块不写了
                     filtered.emplace_back(armor);
                 }
             }
@@ -412,7 +404,8 @@ std::tuple<float, float, float> PredictionNode::get_gimbal_ypr(const rclcpp::Tim
     try {
         transform = tf_buffer_->lookupTransform("chassis", "gimbal_pitch", time_point).transform;
     } catch (const std::exception& ex) {
-        RCLCPP_WARN(get_logger(),
+        RCLCPP_WARN(
+            get_logger(),
             "Failed to get transform from gimbal_pitch to chassis: %s",
             ex.what()
         );
@@ -447,6 +440,62 @@ geometry_msgs::msg::Transform PredictionNode::try_get_transform(
         }
     }
     throw std::runtime_error("try_get_transform failed after 1000 attempts");
+}
+
+void PredictionNode::camera_info_callback(const CameraInfo::SharedPtr msg) {
+    pnp_solver_->set_cam_matrix(
+        cv::Mat(3, 3, CV_64F, msg->k.data()),
+        cv::Mat(1, 5, CV_64F, msg->d.data())
+    );
+    trisection_yaw_->set_cam_matrix(
+        cv::Mat(3, 3, CV_64F, msg->k.data()),
+        cv::Mat(1, 5, CV_64F, msg->d.data())
+    );
+    // 相机内参和畸变在运行中不会改变，所以设置后即可取消camera_info订阅
+    camera_info_sub_.reset();
+    camera_info_sub_ = nullptr;
+}
+
+void PredictionNode::robots_hp_callback(const CompRobotsHp::SharedPtr msg) {
+    constexpr double INVINCIBLE_TIME = 10;
+    int enemy_hp[5];
+    if (target_color_ == 1) {
+        enemy_hp[0] = msg->red_7_robot_hp; // 电控那边认为7是哨兵
+        enemy_hp[1] = msg->red_1_robot_hp;
+        enemy_hp[2] = msg->red_2_robot_hp;
+        enemy_hp[3] = msg->red_3_robot_hp;
+        enemy_hp[4] = msg->red_4_robot_hp;
+    } else {
+        enemy_hp[0] = msg->blue_7_robot_hp; // 电控那边认为7是哨兵
+        enemy_hp[1] = msg->blue_1_robot_hp;
+        enemy_hp[2] = msg->blue_2_robot_hp;
+        enemy_hp[3] = msg->blue_3_robot_hp;
+        enemy_hp[4] = msg->blue_4_robot_hp;
+    }
+
+    static bool is_enemy_dead[5] = {0, 0, 0, 0, 0};
+    static bool is_enemy_invincible[5] = {0, 0, 0, 0, 0};
+    static double invincible_start_time[5] = {0, 0, 0, 0, 0};
+    for (int i = 0; i < 5; i++) {
+        if (enemy_hp[i] <= 0) {
+            is_enemy_dead[i] = true;
+        }
+        if (is_enemy_dead[i] && enemy_hp[i] > 0) {
+            is_enemy_dead[i] = false;
+            is_enemy_invincible[i] = true;
+            invincible_start_time[i] = now().seconds();
+        }
+        if (is_enemy_invincible[i]) {
+            if (now().seconds() - invincible_start_time[i] < INVINCIBLE_TIME) {
+                is_enemy_invincible[i] = true;
+            } else {
+                is_enemy_invincible[i] = false;
+            }
+        }
+        if (!is_enemy_dead[i] && !is_enemy_invincible[i]) {
+            is_enemy_can_shoot_[i] = true;
+        }
+    }
 }
 } // namespace autoaim_prediction
 

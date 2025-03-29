@@ -20,6 +20,7 @@ public:
         P_.setIdentity();
         P_ *= 1.0;
         H_ << 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0;
+        set_output_result();
     }
 
     void update(const cv::Point3f& meas) {
@@ -30,7 +31,7 @@ public:
         Eigen::MatrixXf K = P_ * H_.transpose() * S.inverse();
         x_ += K * y;
         P_ = (Eigen::MatrixXf::Identity(6, 6) - K * H_) * P_;
-        update_output();
+        set_output_result();
     }
 
     void predict(float delta_t) {
@@ -40,7 +41,7 @@ public:
         F_(2, 5) = delta_t;
         x_ = F_ * x_;
         P_ = F_ * P_ * F_.transpose() + Q_;
-        update_output();
+        set_output_result();
     }
 
     // 强制更新状态量中的位置信息
@@ -48,7 +49,7 @@ public:
         x_(0) = meas.x;
         x_(1) = meas.y;
         x_(2) = meas.z;
-        update_output();
+        set_output_result();
     }
 
     cv::Point3f position, velocity;
@@ -58,7 +59,7 @@ private:
     Eigen::MatrixXf P_, F_, Q_, R_;
     Eigen::MatrixXf H_;
 
-    void update_output() {
+    void set_output_result() {
         position.x = x_(0);
         position.y = x_(1);
         position.z = x_(2);
@@ -90,7 +91,7 @@ public:
         P_.setIdentity();
         P_ *= 1.0;
         H_ << 1.0, 0.0;
-        update_output();
+        set_output_result();
     }
 
     void update(const float meas) {
@@ -102,7 +103,12 @@ public:
         x_ += K * y;
         Eigen::MatrixXf I = Eigen::MatrixXf::Identity(2, 2);
         P_ = (I - K * H_) * P_;
-        update_output();
+        if (x_(0) < -M_PI) {
+            x_(0) += M_PI * 2;
+        } else if (x_(0) > M_PI) {
+            x_(0) -= M_PI * 2;
+        }
+        set_output_result();
     }
 
     void predict(const float time_elapsed) {
@@ -110,13 +116,13 @@ public:
         F_(0, 1) = time_elapsed;
         x_ = F_ * x_;
         P_ = F_ * P_ * F_.transpose() + Q_;
-        update_output();
+        set_output_result();
     }
 
     // 强制更新状态量
     void force_change_yaw(const float meas) {
         x_(0) = meas;
-        update_output();
+        set_output_result();
     }
 
     float yaw, palstance;
@@ -129,7 +135,7 @@ private:
     Eigen::MatrixXf R_; // 测量噪声协方差
     Eigen::MatrixXf H_; // 观测矩阵
 
-    void update_output() {
+    void set_output_result() {
         yaw = x_(0);
         palstance = x_(1);
     }
@@ -166,6 +172,8 @@ public:
             weights_mean(i) = 1 / (2 * (state_dim + lambda));
             weights_cov(i) = weights_mean(i);
         }
+
+        set_output_result();
     }
 
     void predict(float time_elapsed) {

@@ -133,30 +133,6 @@ void TrisectionYaw::get_rotation(
     transform.rotation.y = quaternion.getY();
     transform.rotation.z = quaternion.getZ();
     transform.rotation.w = quaternion.getW();
-
-    /*std::printf("-----\n");
-    for(int i=0; i<=36; i++) {
-        std::printf("%.1f: %.2f, ", math::r2d(i*(M_PI/36)-M_PI/2), cost_func(i*(M_PI/36)-M_PI/2));
-    }
-    std::printf("\n");
-    float diff_prior = 0;
-    std::vector<cv::Point3f> prior_3d =
-        spin_armor_3d(armor_center, detection.label, math::d2r(15) - gimbal_pitch, prior_yaw);
-    std::vector<cv::Point2f> prior_2d = project_3d_to_2d(prior_3d);
-    diff_prior += math::get_distance(prior_2d[0], cv::Point2f(detection.tl.x, detection.tl.y));
-    diff_prior += math::get_distance(prior_2d[1], cv::Point2f(detection.bl.x, detection.bl.y));
-    diff_prior += math::get_distance(prior_2d[2], cv::Point2f(detection.br.x, detection.br.y));
-    diff_prior += math::get_distance(prior_2d[3], cv::Point2f(detection.tr.x, detection.tr.y));
-    float diff_result = 0;
-    std::vector<cv::Point3f> result_3d =
-        spin_armor_3d(armor_center, detection.label, math::d2r(15) - gimbal_pitch, armor_yaw);
-    std::vector<cv::Point2f> result_2d = project_3d_to_2d(result_3d);
-    diff_result += math::get_distance(result_2d[0], cv::Point2f(detection.tl.x, detection.tl.y));
-    diff_result += math::get_distance(result_2d[1], cv::Point2f(detection.bl.x, detection.bl.y));
-    diff_result += math::get_distance(result_2d[2], cv::Point2f(detection.br.x, detection.br.y));
-    diff_result += math::get_distance(result_2d[3], cv::Point2f(detection.tr.x, detection.tr.y));
-    std::printf("prior: %.2f, diff_prior: %.2f; result: %.2f, diff_result: %.2f", math::r2d(prior_yaw), diff_prior, math::r2d(armor_yaw), diff_result);
-    std::cout << std::endl;*/
 }
 
 float TrisectionYaw::get_pts_cost(
