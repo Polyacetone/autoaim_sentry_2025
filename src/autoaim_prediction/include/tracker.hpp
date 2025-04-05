@@ -29,6 +29,7 @@ public:
         @param bullet_speed 子弹速度
         @param img_to_fire_time 图像时间到开火时间的估计值
         @return 预测的击打坐标，和是否发弹（即shoot_flag）
+        @attention 不应在tracker_status为lost时调用
     */
     std::tuple<cv::Point3f, bool> get_target_pos(
         const float gimbal_yaw,
@@ -40,7 +41,6 @@ public:
 
 private:
     float INITIAL_RADIUS = 0.26;
-    float INITIAL_HEIGHT = -0.2;
     float MIN_RADIUS = 0.2, MAX_RADIUS = 0.35;
     float SWITCH_ARMOR_ANGLE = math::d2r(50);
     float CLOSE_RADIUS_FILTER_RATIO = 0.7;
@@ -123,7 +123,7 @@ void Tracker::update(const double time_stamp) {
             ukf_->initialize(car_center);
             observing_armor_id_ = 0;
             radius_[0] = radius_[1] = INITIAL_RADIUS;
-            height_[0] = height_[1] = INITIAL_HEIGHT;
+            height_[0] = height_[1] = armors_[0].center.z;
         } else { // 正常预测并更新
             kf_xyz_->predict(time_elapsed);
             kf_yaw_->predict(time_elapsed);
@@ -170,7 +170,7 @@ std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
     const float bullet_speed, 
     const float img_to_fire_time
 ) {
-    if (false && abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD) { // 平动，只用KFXYZ预测
+    if (abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD) { // 平动，只用KFXYZ预测
         // 理论上来说要精确求出这里的击打时间需要解一个方程，这里为了简化直接采用二阶近似
         const float img_to_hit_time_1 = math::get_distance(kf_xyz_->position) / bullet_speed;
         const float img_to_hit_time_2 = img_to_fire_time +
@@ -256,7 +256,6 @@ void Tracker::update_height() {
 void Tracker::load_params(const std::string& params_path) {
     cv::FileStorage fs(params_path, cv::FileStorage::READ);
     fs["Tracker"]["initial_radius"] >> INITIAL_RADIUS;
-    fs["Tracker"]["initial_height"] >> INITIAL_HEIGHT;
     fs["Tracker"]["min_radius"] >> MIN_RADIUS;
     fs["Tracker"]["max_radius"] >> MAX_RADIUS;
     fs["Tracker"]["switch_armor_angle"] >> SWITCH_ARMOR_ANGLE;

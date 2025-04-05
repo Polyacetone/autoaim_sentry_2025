@@ -1,10 +1,10 @@
 /**:
   ros__parameters:
-    enable_print_state: true
-    enable_send_to_serial: true
+    enable_print_state: false
+    enable_send_to_serial: false
 
     # 默认的目标敌人优先级序列。收到决策发送的消息后会被覆盖
-    enemy_priority: [0, 1, 2, 3, 4]
+    enemy_priority: [0, 1, 2, 3, 4, 5]
 
     # 默认的目标敌人颜色和弹速。收到串口节点发送的消息后会被覆盖
     target_color: 0 # 0: blue, 1: red, 2: gray

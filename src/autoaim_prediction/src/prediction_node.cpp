@@ -16,7 +16,6 @@
 #include <hw_sentry_interfaces/msg/bullet_speed.hpp>
 
 #include <pnp_solver.hpp>
-#include <trisection_yaw.hpp>
 #include <tracker.hpp>
 #include <trajectory.hpp>
 
@@ -105,7 +104,6 @@ private:
     std::shared_ptr<rclcpp::Publisher<ShootPos>> shoot_pos_pub_;
 
     std::shared_ptr<PnPSolver> pnp_solver_;
-    std::shared_ptr<TrisectionYaw> trisection_yaw_;
     std::shared_ptr<Tracker> tracker_;
 };
 
@@ -116,7 +114,6 @@ PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
     pnp_solver_ = std::make_shared<PnPSolver>();
-    trisection_yaw_ = std::make_shared<TrisectionYaw>();
     std::string tracker_params_path =
         ament_index_cpp::get_package_share_directory("autoaim_prediction")
         + "/config/tracker_params.yaml";
@@ -207,8 +204,9 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
         armor_to_cam.header.frame_id = "autoaim_camera";
         armor_to_cam.child_frame_id = armor_name;
         // 计算装甲板相对于相机坐标系的位姿
-        pnp_solver_->get_translation(armor, armor_to_cam.transform);
-        trisection_yaw_->get_rotation(armor, armor_to_cam.transform, gimbal_ypr);
+        if (!pnp_solver_->solve_pnp(armor, gimbal_ypr, armor_to_cam.transform)) {
+            continue;
+        }
         tf_broadcaster_->sendTransform(armor_to_cam);
         // 把装甲板的位姿转换到世界坐标系下进行滤波
         try {
@@ -311,7 +309,7 @@ void PredictionNode::decide_target_armor(const DetectionArray::SharedPtr msg) {
         }
     }
     if (target_armor_ != -1) {
-        if (!occurred_armors[target_color_][target_armor_] && !occurred_armors[2][target_armor_]) {
+        if (!occurred_armors[target_color_][target_armor_]) {
             current_target_lost_frames++;
         } else {
             current_target_lost_frames = 0;
@@ -324,9 +322,10 @@ void PredictionNode::decide_target_armor(const DetectionArray::SharedPtr msg) {
                 return;
             }
         } else {
-            if (is_enemy_can_shoot_[label] && armor_appear_frames[target_color_][label] > 10) {
+            if (is_enemy_can_shoot_[label] && armor_appear_frames[target_color_][label] > 5) {
                 target_armor_ = label;
                 current_target_lost_frames = 0;
+                // 把tracker_status设置为lost，下次进入的时候就会重置滤波器了
                 tracker_->tracker_status = TRACKER_STATUS::LOST;
                 return;
             }
@@ -444,10 +443,6 @@ geometry_msgs::msg::Transform PredictionNode::try_get_transform(
 
 void PredictionNode::camera_info_callback(const CameraInfo::SharedPtr msg) {
     pnp_solver_->set_cam_matrix(
-        cv::Mat(3, 3, CV_64F, msg->k.data()),
-        cv::Mat(1, 5, CV_64F, msg->d.data())
-    );
-    trisection_yaw_->set_cam_matrix(
         cv::Mat(3, 3, CV_64F, msg->k.data()),
         cv::Mat(1, 5, CV_64F, msg->d.data())
     );
