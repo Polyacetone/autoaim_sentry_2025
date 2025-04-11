@@ -14,21 +14,15 @@
 #include <hw_sentry_interfaces/msg/enemy_priority.hpp>
 #include <hw_sentry_interfaces/msg/comp_robots_hp.hpp>
 #include <hw_sentry_interfaces/msg/bullet_speed.hpp>
+#include <hw_sentry_interfaces/msg/debug_info.hpp>
 
 #include <pnp_solver.hpp>
 #include <tracker.hpp>
 #include <trajectory.hpp>
 
 namespace autoaim_prediction {
-using hw_sentry_interfaces::msg::BulletSpeed;
-using hw_sentry_interfaces::msg::CompRobotsHp;
-using hw_sentry_interfaces::msg::Detection;
-using hw_sentry_interfaces::msg::DetectionArray;
-using hw_sentry_interfaces::msg::EnemyPriority;
-using hw_sentry_interfaces::msg::RobotColor;
-using hw_sentry_interfaces::msg::ShootPos;
+using namespace hw_sentry_interfaces::msg;
 using sensor_msgs::msg::CameraInfo;
-
 const geometry_msgs::msg::Transform EMPTY_TRANSFORM;
 
 double to_sec(builtin_interfaces::msg::Time t) {
@@ -54,6 +48,7 @@ private:
     void get_parameters();
     void detection_callback(const DetectionArray::SharedPtr msg);
     void camera_info_callback(const CameraInfo::SharedPtr msg);
+    void get_debug_info(DebugInfo& msg);
 
     // 接收机器人血量数据，更新is_enemy_can_shoot，用于筛去死掉或无敌的人
     void robots_hp_callback(const CompRobotsHp::SharedPtr msg);
@@ -102,6 +97,7 @@ private:
     std::shared_ptr<rclcpp::Subscription<CompRobotsHp>> robots_hp_sub_;
 
     std::shared_ptr<rclcpp::Publisher<ShootPos>> shoot_pos_pub_;
+    std::shared_ptr<rclcpp::Publisher<DebugInfo>> debug_info_pub_;
 
     std::shared_ptr<PnPSolver> pnp_solver_;
     std::shared_ptr<Tracker> tracker_;
@@ -144,7 +140,7 @@ void PredictionNode::get_parameters() {
     std::string enemy_priority_sub_topic = declare_parameter("enemy_priority_sub_topic", "decision/enemy_priority");
     std::string robots_hp_sub_topic = declare_parameter("robots_hp_topic", "serial/comp_robots_hp");
 
-    std::string armor_distance_pub_topic = declare_parameter("armor_distance_pub_topic", "prediction/armor_distance");
+    std::string debug_info_pub_topic = declare_parameter("debug_info_pub_topic", "autoaim/debug_info");
     std::string shoot_pos_pub_topic = declare_parameter("shoot_pos_pub_topic", "serial/shoot_pos");
 
     camera_info_sub_ = create_subscription<CameraInfo>(
@@ -185,7 +181,14 @@ void PredictionNode::get_parameters() {
         rclcpp::QoS(3),
         [&](const CompRobotsHp::SharedPtr msg) { robots_hp_callback(msg); }
     );
-    shoot_pos_pub_ = create_publisher<ShootPos>(shoot_pos_pub_topic, rclcpp::SensorDataQoS().keep_last(1));
+    shoot_pos_pub_ = create_publisher<ShootPos>(
+        shoot_pos_pub_topic,
+        rclcpp::SensorDataQoS().keep_last(1)
+    );
+    debug_info_pub_ = create_publisher<DebugInfo>(
+        debug_info_pub_topic,
+        rclcpp::QoS(3)
+    );
 }
 
 void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
@@ -222,6 +225,13 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
         }
     }
     tracker_->update(to_sec(msg->header.stamp));
+
+    DebugInfo debug_info;
+    debug_info.header.stamp = msg->header.stamp;
+    this->get_debug_info(debug_info);
+    tracker_->get_debug_info(debug_info);
+    debug_info_pub_->publish(debug_info);
+
     if (tracker_->tracker_status != TRACKER_STATUS::LOST) {
         cv::Point3f target;
         bool can_shoot;
@@ -439,6 +449,15 @@ geometry_msgs::msg::Transform PredictionNode::try_get_transform(
         }
     }
     throw std::runtime_error("try_get_transform failed after 1000 attempts");
+}
+
+void PredictionNode::get_debug_info(DebugInfo& msg) {
+    msg.target_color = target_color_;
+    msg.target_armor = target_armor_;
+    msg.bullet_speed = bullet_speed_;
+    for (int i = 0; i < 10; i++) {
+        msg.is_enemy_can_shoot.push_back(is_enemy_can_shoot_[i]);
+    }
 }
 
 void PredictionNode::camera_info_callback(const CameraInfo::SharedPtr msg) {

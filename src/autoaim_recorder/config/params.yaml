@@ -1,0 +1,13 @@
+/**:
+  ros__parameters:
+    video_fps: 100.0
+    video_save_directory: "" # 注意后面要有一个斜杠
+
+    debug_info_topic: "autoaim/debug_info"
+    shoot_pos_topic: "autoaim/shoot_pos"
+
+    record_raw: true
+    image_raw_topic: "autoaim/camera/image_raw"
+
+    record_verbose: true
+    image_detected_topic: "autoaim/detected_image"

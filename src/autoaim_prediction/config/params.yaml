@@ -11,8 +11,8 @@
     bullet_speed: 24.0 # 单位: m/s
 
     control_to_fire_time: 0.04 # 单位: s
-    shoot_compensate_pitch: 0.0 # 单位: deg
-    shoot_compensate_yaw: -1.5 # 单位: deg
+    shoot_compensate_pitch: -1.0 # 单位: deg
+    shoot_compensate_yaw: -1.2 # 单位: deg
 
     camera_info_topic: "autoaim/camera/camera_info"
     detection_sub_topic: "autoaim/detection"
@@ -22,3 +22,4 @@
     enemy_priority_sub_topic: "decision/enemy_priority" # 从决策接收，指定打人的优先级
 
     shoot_pos_pub_topic: "autoaim/shoot_pos"
+    debug_info_pub_topic: "autoaim/debug_info"

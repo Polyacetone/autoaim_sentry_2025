@@ -158,9 +158,6 @@ bool PnPSolver::solve_pnp(
     transform.rotation.z = quaternion.getZ();
     transform.rotation.w = quaternion.getW();
 
-    std::cout << "geo: " << math::r2d(geo_yaw) << std::endl;
-    std::cout << "tri: " << math::r2d(tri_yaw) << std::endl;
-
     // 如果装甲板的x坐标小于0，说明解到了相机后方，很明显有问题
     if (transform.translation.x < 0) {
         return false;

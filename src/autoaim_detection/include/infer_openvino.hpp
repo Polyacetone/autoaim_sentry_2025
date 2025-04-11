@@ -184,10 +184,10 @@ cv::Mat OpenVINOInferEngine::debug_draw_armors() {
             image,
             name[detection.label] + " " + std::to_string(detection.confidence).substr(0, 4),
             cv::Point(kpts[0].x - 5, kpts[0].y - 15),
-            cv::FONT_HERSHEY_TRIPLEX,
-            0.8,
+            cv::FONT_HERSHEY_COMPLEX,
+            0.7,
             cv::Scalar(255, 255, 255),
-            1
+            0.7
         );
     }
     return image;

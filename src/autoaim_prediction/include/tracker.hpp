@@ -8,6 +8,8 @@
 
 #include <kalman_filters.hpp>
 #include <math_utils.hpp>
+#include <geometry_msgs/msg/point32.hpp>
+#include <hw_sentry_interfaces/msg/debug_info.hpp>
 
 enum class TRACKER_STATUS { CONVERGING, TRACKING, TEMP_LOST, LOST };
 
@@ -22,6 +24,7 @@ public:
     void push(const geometry_msgs::msg::Transform& transform);
     void update(const double time_stamp);
     void debug_print_state();
+    void get_debug_info(hw_sentry_interfaces::msg::DebugInfo& debug_info);
 
     /*!
         @brief 获取预测击打坐标（世界系下）
@@ -56,8 +59,9 @@ private:
     std::shared_ptr<KFXYZ> kf_xyz_;
     std::shared_ptr<KFYaw> kf_yaw_;
     std::shared_ptr<UKFXY> ukf_;
-    unsigned tracking_frames_ = 0; // 连续出现的帧数
-    unsigned lost_frames_ = 0; // 消失的帧数
+    unsigned track_frames_ = 0; // 从不为LOST开始时一直跟踪的帧数
+    unsigned appear_frames_ = 0; // 从不为TEMP_LOST开始时连续出现的帧数
+    unsigned lost_frames_ = 0; // 从TEMP_LOST或LOST开始时连续消失的帧数
     unsigned observing_armor_id_ = 0; // 正在观测的装甲板编号。定义第一块看到的装甲板为0，车逆时针转时看到的依次编号1、2、3
     float radius_[2]; // radius_[0]对应0、2装甲板半径，radius_[1]对应1、3
     float height_[2]; // height_[0]对应0、2装甲板中心z坐标，height_[1]对应1、3
@@ -97,8 +101,14 @@ void Tracker::update(const double time_stamp) {
     static double prev = time_stamp;
     const float time_elapsed = static_cast<float>(time_stamp - prev); // 和上一帧比经过的时间
 
+    if (tracker_status != TS::LOST) {
+        track_frames_++;
+    } else {
+        track_frames_ = 0;
+    }
+
     if (armors_.empty() || armors_.size() > 2) {
-        tracking_frames_ = 0;
+        appear_frames_ = 0;
         lost_frames_++;
         if (tracker_status != TS::LOST) { // 短暂失踪，只预测不更新
             kf_xyz_->predict(time_elapsed);
@@ -112,7 +122,7 @@ void Tracker::update(const double time_stamp) {
         }
     } else {
         lost_frames_ = 0;
-        tracking_frames_++;
+        appear_frames_++;
         if (tracker_status == TS::LOST) { // 初始化
             kf_xyz_->initialize(armors_[0].center);
             kf_yaw_->initialize(armors_[0].angle);
@@ -154,13 +164,13 @@ void Tracker::update(const double time_stamp) {
             );
             ukf_->update(car_center);
         }
-        if (tracking_frames_ >= CONVERGE_FRAMES) {
+        if (track_frames_ >= CONVERGE_FRAMES) {
             tracker_status = TS::TRACKING;
         } else {
             tracker_status = TS::CONVERGING;
         }
     }
-    
+
     armors_.clear();
     prev = time_stamp;
 }
@@ -275,9 +285,9 @@ void Tracker::debug_print_state() {
     std::printf("----------\n");
     std::printf("current status: ");
     if (tracker_status == TRACKER_STATUS::CONVERGING) {
-        printf("converging, tracking_frames: %d\n", tracking_frames_);
+        printf("converging, appear_frames: %d\n", appear_frames_);
     } else if (tracker_status == TRACKER_STATUS::TRACKING) {
-        printf("tracking, tracking_frames: %d\n", tracking_frames_);
+        printf("tracking, appear_frames: %d\n", appear_frames_);
     } else if (tracker_status == TRACKER_STATUS::LOST) {
         printf("lost, lost_frames: %d\n", lost_frames_);
     } else if (tracker_status == TRACKER_STATUS::TEMP_LOST) {
@@ -306,4 +316,32 @@ void Tracker::debug_print_state() {
     );
     std::printf("radius: %3.0f, %3.0f (cm)\n", radius_[0] * 100, radius_[1] * 100);
     std::printf("height: %3.0f, %3.0f (cm)\n", height_[0] * 100, height_[1] * 100);
+}
+
+void Tracker::get_debug_info(hw_sentry_interfaces::msg::DebugInfo& debug_info) {
+    debug_info.tracker_status = static_cast<int>(tracker_status);
+    debug_info.appear_frames = appear_frames_;
+    debug_info.track_frames = track_frames_;
+    debug_info.lost_frames = lost_frames_;
+    debug_info.observing_armor_id = observing_armor_id_;
+    constexpr auto cvpt3_to_tfpt = [](const cv::Point3f& p) {
+        geometry_msgs::msg::Point32 ret;
+        ret.x = p.x, ret.y = p.y, ret.z = p.z;
+        return ret;
+    };
+    constexpr auto cvpt2_to_tfpt = [](const cv::Point2f& p) {
+        geometry_msgs::msg::Point32 ret;
+        ret.x = p.x, ret.y = p.y;
+        return ret;
+    };
+    debug_info.kf_xyz_position = cvpt3_to_tfpt(kf_xyz_->position);
+    debug_info.kf_xyz_velocity = cvpt3_to_tfpt(kf_xyz_->velocity);
+    debug_info.ukf_xy_position = cvpt2_to_tfpt(ukf_->position);
+    debug_info.ukf_xy_velocity = cvpt2_to_tfpt(ukf_->velocity);
+    debug_info.kf_yaw = kf_yaw_->yaw;
+    debug_info.kf_yaw_palstance = kf_yaw_->palstance;
+    for (int i = 0; i < 2; i++) {
+        debug_info.radius.emplace_back(radius_[i]);
+        debug_info.height.emplace_back(height_[i]);
+    }
 }

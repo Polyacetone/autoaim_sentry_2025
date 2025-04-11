@@ -11,6 +11,7 @@ def launch_func(context, *args, **kwargs):
     camera_params_yaml = os.path.join(get_package_share_directory('autoaim_camera'), 'config', 'params.yaml')
     detection_params_yaml = os.path.join(get_package_share_directory('autoaim_detection'), 'config', 'params.yaml')
     prediction_params_yaml = os.path.join(get_package_share_directory('autoaim_prediction'), 'config', 'params.yaml')
+    recorder_params_yaml = os.path.join(get_package_share_directory('autoaim_recorder'), 'config', 'params.yaml')
     composable_node_descriptions = [
         ComposableNode(
             package='autoaim_camera',
@@ -31,6 +32,13 @@ def launch_func(context, *args, **kwargs):
             plugin='autoaim_prediction::PredictionNode',
             name='autoaim_prediction',
             parameters=[prediction_params_yaml],
+            extra_arguments=[{'use_intra_process_comms': True}]
+        ),
+        ComposableNode(
+            package='autoaim_recorder',
+            plugin='autoaim_recorder::RecorderNode',
+            name='autoaim_recorder',
+            parameters=[recorder_params_yaml],
             extra_arguments=[{'use_intra_process_comms': True}]
         )
     ]
