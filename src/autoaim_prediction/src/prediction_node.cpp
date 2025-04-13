@@ -69,6 +69,10 @@ private:
     // 之所以是ypr不是rpy，是因为我们采用的旋转顺序是yaw, pitch, roll。
     std::tuple<float, float, float> get_gimbal_ypr(const rclcpp::Time& time_point) const;
 
+    bool is_big_armor(int label) const {
+        return (label == 1);
+    }
+
     bool enable_print_state_;
     bool enable_send_to_serial_;
     bool enable_self_decision_;
@@ -359,7 +363,7 @@ void PredictionNode::select_armors(const std::vector<Detection>& src, std::vecto
     // 筛选出目标颜色和标签的装甲板
     for (const auto& armor: src) {
         // 用装甲板长宽比筛掉太斜的装甲板
-        const bool yaw_too_large = get_length_height_ratio(armor) < (armor.label == 1 ? 2.0 : 1.6);
+        const bool yaw_too_large = get_length_height_ratio(armor) < (is_big_armor(armor.label) ? 2.0 : 1.6);
         if (!yaw_too_large && armor.label == target_armor_) {
             if (target_color_ == armor.color) {
                 filtered.emplace_back(armor);

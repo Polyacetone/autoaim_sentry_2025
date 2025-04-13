@@ -1,0 +1,23 @@
+cmake_minimum_required(VERSION 3.10)
+project(autoaim_anti_dart)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+add_compile_options("-Ofast")
+
+find_package(ament_cmake_auto REQUIRED)
+ament_auto_find_build_dependencies()
+
+ament_auto_add_library(${PROJECT_NAME} SHARED src/anti_dart_node.cpp)
+
+rclcpp_components_register_node(${PROJECT_NAME}
+  PLUGIN autoaim_anti_dart::AntiDartNode
+  EXECUTABLE ${PROJECT_NAME}_node
+)
+
+ament_auto_package(
+  INSTALL_TO_SHARE
+  config
+  launch
+)

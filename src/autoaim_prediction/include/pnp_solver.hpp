@@ -69,6 +69,13 @@ private:
         const int iterations
     ) const;
 
+    float get_armor_pitch_to_world(int label) const {
+        return math::d2r((label == 5) ? -15 : 15);
+    }
+    bool is_big_armor(int label) const {
+        return (label == 1);
+    }
+
     static constexpr int FIND_ANGLE_ITERATIONS = 12; // 三分法迭代次数，理想精度<1
     static constexpr float DETECTOR_ERROR_PIXEL_BY_SLOPE = 2.0;
 
@@ -76,7 +83,7 @@ private:
     static constexpr float HEIGHT = 0.055;
     static constexpr float BIG_WIDTH = 0.2253;
     static constexpr float SMALL_WIDTH = 0.135;
-    // 装甲板坐标系向右是x，向前是y，向上是z
+    // 装甲板坐标系：前x，左y，上z
     const std::vector<cv::Point3f> SMALL_POINTS {
         {0, SMALL_WIDTH / 2, HEIGHT / 2},
         {0, SMALL_WIDTH / 2, -HEIGHT / 2},
@@ -107,7 +114,7 @@ bool PnPSolver::solve_pnp(
     };
     std::vector<cv::Mat> rvecs(2), tvecs(2);
     cv::solvePnPGeneric(
-        (detection.label == 1) ? BIG_POINTS : SMALL_POINTS,
+        is_big_armor(detection.label) ? BIG_POINTS : SMALL_POINTS,
         img_pts,
         cam_intrinsic_,
         cam_distortion_,
@@ -147,7 +154,7 @@ bool PnPSolver::solve_pnp(
     const float tri_yaw = trisection_get_yaw(gimbal_pr, translation, img_pts, detection.label, geo_yaw);
 
     tf2::Quaternion quaternion;
-    const float armor_pitch_to_world = math::d2r(detection.label == 5 ? -15 : 15);
+    const float armor_pitch_to_world = get_armor_pitch_to_world(detection.label);
     // 旋转相当于相机系，所以需要用装甲板在世界系下的roll（取0即可）和pitch减去云台的roll和pitch
     quaternion.setRPY(-gimbal_roll, armor_pitch_to_world - gimbal_pitch, tri_yaw);
     transform.translation.x = translation(0);
@@ -185,7 +192,7 @@ float PnPSolver::geometric_get_yaw(
     std::vector<cv::Point2f> reprojected_pts;
     // 在转掉了云台pitch和roll的opencv相机系中重投影，得到装甲板角点
     projectPoints(
-        (label == 1) ? BIG_POINTS : SMALL_POINTS,
+        is_big_armor(label) ? BIG_POINTS : SMALL_POINTS,
         corrected_rvec_cv,
         corrected_tvec_cv,
         cam_intrinsic_,
@@ -194,7 +201,7 @@ float PnPSolver::geometric_get_yaw(
     );
     const cv::Point2f vertical_line =
         (reprojected_pts[0] + reprojected_pts[3] - reprojected_pts[1] - reprojected_pts[2]) / 2;
-    const float armor_pitch_to_world = math::d2r(label == 5 ? -15 : 15);
+    const float armor_pitch_to_world = get_armor_pitch_to_world(label);
     return asin(std::clamp(tan(vertical_line.x / vertical_line.y) / tan(armor_pitch_to_world), -0.7f, 0.7f));
 }
 
@@ -210,7 +217,7 @@ float PnPSolver::trisection_get_yaw(
     const Eigen::Vector3f corrected_translation(gimbal_pr * translation);
 
     std::function cost_func = [&](float yaw) -> float {
-        const float armor_pitch_to_world = math::d2r(label == 5 ? -15 : 15);
+        const float armor_pitch_to_world = get_armor_pitch_to_world(label);
         // 在转掉pitch和roll的“世界系”下按给定的yaw转装甲板
         std::vector<Eigen::Vector3f> spinned_armor_pts_corrected =
             get_spinned_pts(corrected_translation, label, armor_pitch_to_world, yaw);
@@ -278,7 +285,7 @@ std::vector<Eigen::Vector3f> PnPSolver::get_spinned_pts(
     const float armor_pitch,
     const float armor_yaw
 ) const {
-    const float WIDTH = (armor_label == 1) ? BIG_WIDTH : SMALL_WIDTH;
+    const float WIDTH = is_big_armor(armor_label) ? BIG_WIDTH : SMALL_WIDTH;
     // 长度为装甲板宽度的一半，方向向左（装甲板系y轴正方向）
     const Eigen::Vector3f width_vec = Eigen::Vector3f(-sin(armor_yaw), cos(armor_yaw), 0) * (WIDTH / 2);
     // 长度为装甲板高度的一半，方向向上（装甲板系z轴正方向）

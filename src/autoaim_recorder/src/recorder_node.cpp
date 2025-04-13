@@ -286,9 +286,9 @@ void RecorderNode::draw_info_on_img(const ShootPos::SharedPtr msg, cv::Mat& img)
     };
     char buf[64];
 
-    std::sprintf(buf, "Pitch: %4.1f", msg->pitch);
+    std::sprintf(buf, "Pitch: %4.1f", r2d(msg->pitch));
     text_left_align(img, buf, Point(530, 350), WHITE);
-    std::sprintf(buf, "Yaw: %4.1f", msg->yaw);
+    std::sprintf(buf, "Yaw: %4.1f", r2d(msg->yaw));
     text_left_align(img, buf, Point(530, 365), WHITE);
     std::sprintf(buf, "Flag: %s", msg->shoot_flag ? "true" : "false");
     text_left_align(img, buf, Point(530, 380), WHITE);

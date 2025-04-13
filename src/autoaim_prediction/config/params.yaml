@@ -1,7 +1,7 @@
 /**:
   ros__parameters:
     enable_print_state: false
-    enable_send_to_serial: false
+    enable_send_to_serial: true
 
     # 默认的目标敌人优先级序列。收到决策发送的消息后会被覆盖
     enemy_priority: [0, 1, 2, 3, 4, 5]

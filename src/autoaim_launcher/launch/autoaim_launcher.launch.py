@@ -11,6 +11,7 @@ def launch_func(context, *args, **kwargs):
     camera_params_yaml = os.path.join(get_package_share_directory('autoaim_camera'), 'config', 'params.yaml')
     detection_params_yaml = os.path.join(get_package_share_directory('autoaim_detection'), 'config', 'params.yaml')
     prediction_params_yaml = os.path.join(get_package_share_directory('autoaim_prediction'), 'config', 'params.yaml')
+    anti_dart_params_yaml = os.path.join(get_package_share_directory('autoaim_anti_dart'), 'config', 'params.yaml')
     recorder_params_yaml = os.path.join(get_package_share_directory('autoaim_recorder'), 'config', 'params.yaml')
     composable_node_descriptions = [
         ComposableNode(
@@ -25,6 +26,13 @@ def launch_func(context, *args, **kwargs):
             plugin='autoaim_detection::YoloDetectNode',
             name='autoaim_detection',
             parameters=[detection_params_yaml],
+            extra_arguments=[{'use_intra_process_comms': True}]
+        ),
+        ComposableNode(
+            package='autoaim_anti_dart',
+            plugin='autoaim_anti_dart::AntiDartNode',
+            name='autoaim_anti_dart',
+            parameters=[anti_dart_params_yaml],
             extra_arguments=[{'use_intra_process_comms': True}]
         ),
         ComposableNode(
