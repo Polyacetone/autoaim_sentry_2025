@@ -43,6 +43,7 @@ private:
     std::mutex debug_info_que_mtx_, shoot_pos_que_mtx_;
 
     cv::VideoWriter video_writer_raw_, video_writer_verbose_;
+    std::mutex video_writer_verbose_mtx_;
     double start_time_;
 
     float video_fps_;
@@ -97,7 +98,7 @@ void RecorderNode::get_parameters() {
             declare_parameter("img_raw_topic", "autoaim/camera/image_raw");
         img_raw_sub_ = create_subscription<sensor_msgs::msg::Image>(
             img_raw_topic,
-            rclcpp::SensorDataQoS().keep_last(5),
+            rclcpp::SensorDataQoS().keep_last(1),
             [&](const sensor_msgs::msg::Image::SharedPtr msg) {
                 std::thread(&RecorderNode::img_raw_callback, this, msg).detach();
             }
@@ -108,7 +109,7 @@ void RecorderNode::get_parameters() {
             declare_parameter("image_detected_topic", "autoaim/detected_image");
         img_detected_sub_ = create_subscription<sensor_msgs::msg::Image>(
             img_detected_topic,
-            rclcpp::QoS(5),
+            rclcpp::QoS(1),
             [&](const sensor_msgs::msg::Image::SharedPtr msg) {
                 std::thread(&RecorderNode::img_detected_callback, this, msg).detach();
             }
@@ -118,11 +119,11 @@ void RecorderNode::get_parameters() {
     std::string debug_info_topic = declare_parameter("debug_info_topic", "autoaim/debug_info");
     debug_info_sub_ = create_subscription<DebugInfo>(
         debug_info_topic,
-        rclcpp::QoS(5),
+        rclcpp::QoS(1),
         [&](const DebugInfo::SharedPtr msg) {
             debug_info_que_mtx_.lock();
             debug_info_que_.emplace_front(msg);
-            if (debug_info_que_.size() >= 10) {
+            if (debug_info_que_.size() >= 5) {
                 debug_info_que_.pop_back();
             }
             debug_info_que_mtx_.unlock();
@@ -131,11 +132,11 @@ void RecorderNode::get_parameters() {
     std::string shoot_pos_topic = declare_parameter("shoot_pos_topic", "autoaim/shoot_pos");
     shoot_pos_sub_ = create_subscription<ShootPos>(
         shoot_pos_topic,
-        rclcpp::SensorDataQoS().keep_last(5),
+        rclcpp::SensorDataQoS().keep_last(1),
         [&](const ShootPos::SharedPtr msg) {
             shoot_pos_que_mtx_.lock();
             shoot_pos_que_.emplace_front(msg);
-            if (shoot_pos_que_.size() >= 10) {
+            if (shoot_pos_que_.size() >= 5) {
                 shoot_pos_que_.pop_back();
             }
             shoot_pos_que_mtx_.unlock();
@@ -151,7 +152,7 @@ void RecorderNode::img_raw_callback(const sensor_msgs::msg::Image::SharedPtr msg
 void RecorderNode::img_detected_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
     auto cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    
+
     DebugInfo::SharedPtr debug_info_msg = nullptr;
     debug_info_que_mtx_.lock();
     for (auto it = debug_info_que_.begin(); it != debug_info_que_.end(); it++) {
@@ -180,7 +181,10 @@ void RecorderNode::img_detected_callback(const sensor_msgs::msg::Image::SharedPt
     if (shoot_pos_msg) {
         draw_info_on_img(shoot_pos_msg, cv_ptr->image);
     }
+
+    video_writer_verbose_mtx_.lock();
     video_writer_verbose_ << cv_ptr->image;
+    video_writer_verbose_mtx_.unlock();
 }
 
 void RecorderNode::draw_info_on_img(const DebugInfo::SharedPtr msg, cv::Mat& img) const {

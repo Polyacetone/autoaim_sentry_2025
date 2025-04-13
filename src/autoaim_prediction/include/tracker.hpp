@@ -22,7 +22,7 @@ class Tracker {
 public:
     Tracker(const std::string& params_path);
     void push(const geometry_msgs::msg::Transform& transform);
-    void update(const double time_stamp);
+    void update(const double time_stamp, const int label);
     void debug_print_state();
     void get_debug_info(hw_sentry_interfaces::msg::DebugInfo& debug_info);
 
@@ -43,8 +43,11 @@ public:
     TRACKER_STATUS tracker_status = TRACKER_STATUS::LOST;
 
 private:
+    static constexpr int OUTPOST_LABEL = 5;
+
     float INITIAL_RADIUS = 0.26;
     float MIN_RADIUS = 0.2, MAX_RADIUS = 0.35;
+    float OUTPOST_RADIUS = 0.22;
     float SWITCH_ARMOR_ANGLE = math::d2r(50);
     float CLOSE_RADIUS_FILTER_RATIO = 0.7;
     float FAR_RADIUS_FILTER_RATIO = 0.8;
@@ -55,6 +58,7 @@ private:
     float ANTITOP_FOLLOW_ANGLE = math::d2r(30);
     int MAX_LOST_FRAMES = 5;
     int CONVERGE_FRAMES = 5;
+    int OUTPOST_MAX_LOST_FRAMES = 40;
 
     std::shared_ptr<KFXYZ> kf_xyz_;
     std::shared_ptr<KFYaw> kf_yaw_;
@@ -65,6 +69,8 @@ private:
     unsigned observing_armor_id_ = 0; // 正在观测的装甲板编号。定义第一块看到的装甲板为0，车逆时针转时看到的依次编号1、2、3
     float radius_[2]; // radius_[0]对应0、2装甲板半径，radius_[1]对应1、3
     float height_[2]; // height_[0]对应0、2装甲板中心z坐标，height_[1]对应1、3
+
+    int target_label_; // 当前正在跟踪的目标编号，用于特判前哨站
     std::vector<Armor> armors_;
 
     void load_params(const std::string& params_path);
@@ -96,7 +102,8 @@ void Tracker::push(const geometry_msgs::msg::Transform& transform) {
     armors_.emplace_back(armor);
 }
 
-void Tracker::update(const double time_stamp) {
+void Tracker::update(const double time_stamp, const int label) {
+    target_label_ = label;
     using TS = TRACKER_STATUS;
     static double prev = time_stamp;
     const float time_elapsed = static_cast<float>(time_stamp - prev); // 和上一帧比经过的时间
@@ -114,7 +121,7 @@ void Tracker::update(const double time_stamp) {
             kf_xyz_->predict(time_elapsed);
             kf_yaw_->predict(time_elapsed);
             ukf_->predict(time_elapsed);
-            if (lost_frames_ >= MAX_LOST_FRAMES) {
+            if (lost_frames_ >= ((target_label_ == OUTPOST_LABEL) ? OUTPOST_MAX_LOST_FRAMES : MAX_LOST_FRAMES)) {
                 tracker_status = TS::LOST;
             } else {
                 tracker_status = TS::TEMP_LOST;
@@ -126,18 +133,21 @@ void Tracker::update(const double time_stamp) {
         if (tracker_status == TS::LOST) { // 初始化
             kf_xyz_->initialize(armors_[0].center);
             kf_yaw_->initialize(armors_[0].angle);
+            const float radius = (target_label_ == OUTPOST_LABEL) ? OUTPOST_RADIUS : INITIAL_RADIUS;
             const cv::Point2f car_center(
-                armors_[0].center.x + INITIAL_RADIUS * cos(armors_[0].angle),
-                armors_[0].center.y + INITIAL_RADIUS * sin(armors_[0].angle)
+                armors_[0].center.x + radius * cos(armors_[0].angle),
+                armors_[0].center.y + radius * sin(armors_[0].angle)
             );
             ukf_->initialize(car_center);
             observing_armor_id_ = 0;
-            radius_[0] = radius_[1] = INITIAL_RADIUS;
+            radius_[0] = radius_[1] = radius;
             height_[0] = height_[1] = armors_[0].center.z;
         } else { // 正常预测并更新
             kf_xyz_->predict(time_elapsed);
             kf_yaw_->predict(time_elapsed);
             ukf_->predict(time_elapsed);
+            // 限制残差，即theta观测值和状态量theta的差距不应该超过180°
+            // 例如179°和-179°实际只有2°残差
             if (armors_[0].angle - kf_yaw_->yaw > M_PI) {
                 armors_[0].angle -= M_PI * 2;
             } else if (armors_[0].angle - kf_yaw_->yaw < -M_PI) {
@@ -158,9 +168,10 @@ void Tracker::update(const double time_stamp) {
             kf_yaw_->update(armors_[0].angle);
             update_radius();
             update_height();
+            const float radius = (target_label_ == OUTPOST_LABEL) ? OUTPOST_RADIUS : radius_[observing_armor_id_ % 2];
             const cv::Point2f car_center(
-                armors_[0].center.x + radius_[observing_armor_id_ % 2] * cos(armors_[0].angle),
-                armors_[0].center.y + radius_[observing_armor_id_ % 2] * sin(armors_[0].angle)
+                armors_[0].center.x + radius * cos(armors_[0].angle),
+                armors_[0].center.y + radius * sin(armors_[0].angle)
             );
             ukf_->update(car_center);
         }
@@ -180,7 +191,7 @@ std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
     const float bullet_speed, 
     const float img_to_fire_time
 ) {
-    if (abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD) { // 平动，只用KFXYZ预测
+    if (abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD && target_label_ != OUTPOST_LABEL) { // 平动，只用KFXYZ预测
         // 理论上来说要精确求出这里的击打时间需要解一个方程，这里为了简化直接采用二阶近似
         const float img_to_hit_time_1 = math::get_distance(kf_xyz_->position) / bullet_speed;
         const float img_to_hit_time_2 = img_to_fire_time +
@@ -199,12 +210,15 @@ std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
         const float pred_yaw_to_world = kf_yaw_->yaw + kf_yaw_->palstance * img_to_hit_time_2;
         // 0号装甲板在gimbal系下的预测yaw角
         const float pred_yaw_to_gimbal = math::rad_period_correction(pred_yaw_to_world - gimbal_yaw);
-        float target_angle_to_gimbal = M_PI / 2; // 最面向我们的装甲板在gimbal系下的预测角
+        // 车的装甲板数量，前哨站只有三个装甲板
+        const int armors_count = (target_label_ == OUTPOST_LABEL) ? 3 : 4;
+        // 最面向我们的装甲板在gimbal系下的预测角
+        float target_angle_to_gimbal = M_PI * 2 / armors_count; 
         int target_armor_index = 0;
         // 选择在img_to_hit_time之后，角度最小（即最面向我们）的那个装甲板
-        for (int i = 0; i < 4; i++) {
-            const float pred_angle_to_gimbal = 
-                math::rad_period_correction(pred_yaw_to_gimbal + i * M_PI / 2);
+        for (int i = 0; i < armors_count; i++) {
+            const float pred_angle_to_gimbal =
+                math::rad_period_correction(pred_yaw_to_gimbal + M_PI * i * 2 / armors_count);
             if (abs(pred_angle_to_gimbal) < abs(target_angle_to_gimbal)) {
                 target_angle_to_gimbal = pred_angle_to_gimbal;
                 target_armor_index = (observing_armor_id_ + i) % 2;
@@ -213,10 +227,12 @@ std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
         if (abs(target_angle_to_gimbal) < ANTITOP_FOLLOW_ANGLE) { // 跟随射击
             const float target_angle_to_world = 
                 math::rad_period_correction(target_angle_to_gimbal + gimbal_yaw);
+            const float radius = (target_label_ == OUTPOST_LABEL) ? OUTPOST_RADIUS : radius_[target_armor_index];
+            const float height = (target_label_ == OUTPOST_LABEL) ? height_[0] : height_[target_armor_index];
             const cv::Point3f target = cv::Point3f(
-                pred_center.x - cos(target_angle_to_world) * radius_[target_armor_index],
-                pred_center.y - sin(target_angle_to_world) * radius_[target_armor_index],
-                height_[target_armor_index]
+                pred_center.x - cos(target_angle_to_world) * radius,
+                pred_center.y - sin(target_angle_to_world) * radius,
+                height
             );
             const bool shoot_flag = abs(target_angle_to_gimbal) < ANTITOP_CAN_SHOOT_ANGLE;
             return std::make_tuple(target, shoot_flag && tracker_status != TRACKER_STATUS::CONVERGING);
@@ -224,10 +240,12 @@ std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
             const float next_follow_angle_to_world = math::rad_period_correction(
                 (kf_yaw_->palstance > 0 ? -1 : 1) * ANTITOP_FOLLOW_ANGLE + gimbal_yaw
             );
+            const float radius = (target_label_ == OUTPOST_LABEL) ? OUTPOST_RADIUS : radius_[1 - target_armor_index];
+            const float height = (target_label_ == OUTPOST_LABEL) ? height_[0] : height_[1 - target_armor_index];
             const cv::Point3f target = cv::Point3f(
-                pred_center.x - cos(next_follow_angle_to_world) * radius_[1 - target_armor_index],
-                pred_center.y - sin(next_follow_angle_to_world) * radius_[1 - target_armor_index],
-                height_[1 - target_armor_index]
+                pred_center.x - cos(next_follow_angle_to_world) * radius,
+                pred_center.y - sin(next_follow_angle_to_world) * radius,
+                height
             );
             return std::make_tuple(target, false);
         }
@@ -235,7 +253,7 @@ std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
 }
 
 void Tracker::update_radius() {
-    if (armors_.size() == 2) {
+    if (target_label_ != OUTPOST_LABEL && armors_.size() == 2) {
         const int index = observing_armor_id_ % 2;
         const float delta_x = armors_[1].center.x - armors_[0].center.x;
         const float delta_y = armors_[1].center.y - armors_[0].center.y;
@@ -254,6 +272,12 @@ void Tracker::update_radius() {
 }
 
 void Tracker::update_height() {
+    if (target_label_ == OUTPOST_LABEL) {
+        height_[0] = CLOSE_HEIGHT_FILTER_RATIO * height_[0] 
+            + (1 - CLOSE_HEIGHT_FILTER_RATIO) * armors_[0].center.z;
+        return;
+    }
+
     const int index = observing_armor_id_ % 2;
     height_[index] = CLOSE_HEIGHT_FILTER_RATIO * height_[index]
         + (1 - CLOSE_HEIGHT_FILTER_RATIO) * armors_[0].center.z;
@@ -278,6 +302,9 @@ void Tracker::load_params(const std::string& params_path) {
     fs["Tracker"]["antitop_can_shoot_angle"] >> ANTITOP_CAN_SHOOT_ANGLE;
     fs["Tracker"]["max_lost_frames"] >> MAX_LOST_FRAMES;
     fs["Tracker"]["converge_frames"] >> CONVERGE_FRAMES;
+
+    fs["Tracker"]["outpost_radius"] >> OUTPOST_RADIUS;
+    fs["Tracker"]["outpost_max_lost_frames"] >> OUTPOST_MAX_LOST_FRAMES;
     fs.release();
 }
 

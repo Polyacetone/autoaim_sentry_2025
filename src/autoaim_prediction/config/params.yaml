@@ -7,7 +7,7 @@
     enemy_priority: [0, 1, 2, 3, 4, 5]
 
     # 默认的目标敌人颜色和弹速。收到串口节点发送的消息后会被覆盖
-    target_color: 0 # 0: blue, 1: red, 2: gray
+    target_color: 0 # 0: blue, 1: red
     bullet_speed: 24.0 # 单位: m/s
 
     control_to_fire_time: 0.04 # 单位: s

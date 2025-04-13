@@ -18,6 +18,9 @@ Tracker:
   max_lost_frames: 10 # 最大的丢失帧数。超过就从TEMP_LOST变为LOST
   converge_frames: 20 # 收敛帧数。超过则从CONVERGING变为TRACKING
 
+  outpost_radius: 0.275 # 前哨站半径，固定值
+  outpost_max_lost_frames: 30 # 前哨站最大的丢失帧数。超过就从TEMP_LOST变为LOST
+
 KFXYZ:
   process_noise_cov: !!opencv-matrix
     rows: 6

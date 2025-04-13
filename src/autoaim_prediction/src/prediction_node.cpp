@@ -23,7 +23,6 @@
 namespace autoaim_prediction {
 using namespace hw_sentry_interfaces::msg;
 using sensor_msgs::msg::CameraInfo;
-const geometry_msgs::msg::Transform EMPTY_TRANSFORM;
 
 double to_sec(builtin_interfaces::msg::Time t) {
     return t.sec + t.nanosec * 1e-9;
@@ -155,7 +154,7 @@ void PredictionNode::get_parameters() {
     );
     robot_color_sub_ = create_subscription<RobotColor>(
         robot_color_sub_topic,
-        rclcpp::QoS(3),
+        rclcpp::QoS(1),
         [&](const RobotColor::SharedPtr msg) {
             // 需要做一个处理避免裁判系统乱发东西吗？
             target_color_ = 1 - msg->robot_color;
@@ -163,9 +162,9 @@ void PredictionNode::get_parameters() {
     );
     bullet_speed_sub_ = create_subscription<BulletSpeed>(
         bullet_speed_sub_topic,
-        rclcpp::QoS(3),
+        rclcpp::QoS(1),
         [&](const BulletSpeed::SharedPtr msg) {
-            if (23 <= msg->bullet_speed && msg->bullet_speed <= 25) {
+            if (21 <= msg->bullet_speed && msg->bullet_speed <= 25) {
                 // 对弹速进行惯性滤波
                 bullet_speed_ = 0.5 * msg->bullet_speed + 0.5 * bullet_speed_;
             }
@@ -173,12 +172,12 @@ void PredictionNode::get_parameters() {
     );
     enemy_priority_sub_ = create_subscription<EnemyPriority>(
         enemy_priority_sub_topic,
-        rclcpp::QoS(3),
+        rclcpp::QoS(1),
         [&](const EnemyPriority::SharedPtr msg) { enemy_priority_ = msg->enemy_priority; }
     );
     robots_hp_sub_ = create_subscription<CompRobotsHp>(
         robots_hp_sub_topic,
-        rclcpp::QoS(3),
+        rclcpp::QoS(1),
         [&](const CompRobotsHp::SharedPtr msg) { robots_hp_callback(msg); }
     );
     shoot_pos_pub_ = create_publisher<ShootPos>(
@@ -187,7 +186,7 @@ void PredictionNode::get_parameters() {
     );
     debug_info_pub_ = create_publisher<DebugInfo>(
         debug_info_pub_topic,
-        rclcpp::QoS(3)
+        rclcpp::QoS(1)
     );
 }
 
@@ -224,7 +223,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
             );
         }
     }
-    tracker_->update(to_sec(msg->header.stamp));
+    tracker_->update(to_sec(msg->header.stamp), target_armor_);
 
     DebugInfo debug_info;
     debug_info.header.stamp = msg->header.stamp;
@@ -438,7 +437,7 @@ geometry_msgs::msg::Transform PredictionNode::try_get_transform(
     const std::string& source,
     const rclcpp::Time& time_point
 ) const {
-    constexpr int MAX_ATTEMPTS = 1000;
+    constexpr int MAX_ATTEMPTS = 100;
     geometry_msgs::msg::Transform transform;
     for (int i = 0; i < MAX_ATTEMPTS; i++) {
         try {
@@ -448,7 +447,7 @@ geometry_msgs::msg::Transform PredictionNode::try_get_transform(
             std::this_thread::sleep_for(std::chrono::microseconds(1));
         }
     }
-    throw std::runtime_error("try_get_transform failed after 1000 attempts");
+    throw std::runtime_error("try_get_transform failed after 100 attempts");
 }
 
 void PredictionNode::get_debug_info(DebugInfo& msg) {

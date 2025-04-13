@@ -33,7 +33,7 @@ public:
         );
         img_detected_pub_ = this->create_publisher<sensor_msgs::msg::Image>(
             img_detected_topic_,
-            10
+            rclcpp::QoS(1)
         );
     }
 
