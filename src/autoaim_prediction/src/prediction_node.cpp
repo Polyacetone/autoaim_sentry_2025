@@ -329,23 +329,26 @@ void PredictionNode::decide_target_armor(const DetectionArray::SharedPtr msg) {
         }
     }
 
-    for (const int label: enemy_priority_) {
-        if (label == target_armor_) {
-            if (is_enemy_can_shoot_[label] && current_target_lost_frames <= 10) {
-                return;
-            }
-        } else {
-            if (is_enemy_can_shoot_[label] && armor_appear_frames[target_color_][label] > 5) {
-                target_armor_ = label;
-                current_target_lost_frames = 0;
-                // 把tracker_status设置为lost，下次进入的时候就会重置滤波器了
-                tracker_->tracker_status = TRACKER_STATUS::LOST;
-                return;
+    if (!enemy_priority_.empty()) {
+        for (const int label: enemy_priority_) {
+            if (label == -1) continue;
+            if (label == target_armor_) {
+                if (is_enemy_can_shoot_[label] && current_target_lost_frames <= 10) {
+                    return;
+                }
+            } else {
+                if (is_enemy_can_shoot_[label] && armor_appear_frames[target_color_][label] > 5) {
+                    target_armor_ = label;
+                    current_target_lost_frames = 0;
+                    tracker_->tracker_status = TRACKER_STATUS::LOST;
+                    return;
+                }
             }
         }
     }
 
     target_armor_ = -1;
+    tracker_->tracker_status = TRACKER_STATUS::LOST;
 }
 
 void PredictionNode::select_armors(const std::vector<Detection>& src, std::vector<Detection>& dst) const {

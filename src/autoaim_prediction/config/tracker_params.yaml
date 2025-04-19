@@ -4,22 +4,27 @@
 # 均采用国际单位制，距离为m，时间为s，角度为弧度
 
 Tracker:
+# 以下Tracker参数对车和前哨站都生效
+  switch_armor_angle: 0.9 # 角度突变的阈值，用于判断小陀螺跟踪的装甲板是否切换
+  close_height_filter_ratio: 0.9 # 较近的装甲板对应高度的惯性滤波系数
+  far_height_filter_ratio: 0.95 # 较远的装甲板对应高度的惯性滤波系数
+  converge_frames: 20 # 收敛帧数。超过则从CONVERGING变为TRACKING
+
+# 以下Tracker参数仅对车生效
   initial_radius: 0.26
   min_radius: 0.2 # 用于更新惯性滤波的半径最小值
   max_radius: 0.4 # 用于更新惯性滤波的半径最大值
-  switch_armor_angle: 0.9 # 角度突变的阈值，用于判断小陀螺跟踪的装甲板是否切换
   close_radius_filter_ratio: 0.95 # 较近的装甲板对应半径的惯性滤波系数
   far_radius_filter_ratio: 0.99 # 较远的装甲板对应半径的惯性滤波系数
-  close_height_filter_ratio: 0.9 # 较近的装甲板对应高度的惯性滤波系数
-  far_height_filter_ratio: 0.95 # 较远的装甲板对应高度的惯性滤波系数
   antitop_palstance_threshold: 1.74533 # 启用反陀螺的角速度阈值。1.74533rad/s = 100deg/s
   antitop_follow_angle: 0.6 # 小陀螺时，让yaw跟随的角度最大值。若超过则在另一边等待
   antitop_can_shoot_angle: 0.5 # 小陀螺时，shoot_flag置为true的角度最大值
   max_lost_frames: 10 # 最大的丢失帧数。超过就从TEMP_LOST变为LOST
-  converge_frames: 20 # 收敛帧数。超过则从CONVERGING变为TRACKING
 
+# 以下Tracker参数仅对前哨站生效
   outpost_radius: 0.275 # 前哨站半径，固定值
   outpost_max_lost_frames: 30 # 前哨站最大的丢失帧数。超过就从TEMP_LOST变为LOST
+  outpost_can_shoot_angle: 0.75 # 前哨站跟随并击打的角度范围
 
 KFXYZ:
   process_noise_cov: !!opencv-matrix

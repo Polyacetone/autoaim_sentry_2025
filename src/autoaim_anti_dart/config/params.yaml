@@ -1,6 +1,6 @@
 /**:
   ros__parameters:
-    enable_anti_dart: true
+    enable_anti_dart: false
     enable_detected_image: false
 
     image_topic: "autoaim/camera/image_raw"
