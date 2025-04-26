@@ -43,7 +43,7 @@ private:
     std::mutex debug_info_que_mtx_, shoot_pos_que_mtx_;
 
     cv::VideoWriter video_writer_raw_, video_writer_verbose_;
-    std::mutex video_writer_verbose_mtx_;
+    std::mutex video_writer_raw_mtx_, video_writer_verbose_mtx_;
     double start_time_;
 
     float video_fps_;
@@ -145,12 +145,26 @@ void RecorderNode::get_parameters() {
 }
 
 void RecorderNode::img_raw_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
-    const auto cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
-    video_writer_raw_ << cv_ptr->image;
+    const auto cv_ptr = cv_bridge::toCvShare(msg, "bgr8");
+    if (cv_ptr->image.empty()) {
+        RCLCPP_WARN(get_logger(), "img_detected_callback() get an empty frame, ignoring");
+        return;
+    }
+    cv::Mat image = cv_ptr->image.clone();
+
+    video_writer_raw_mtx_.lock();
+    video_writer_raw_ << image;
+    video_writer_raw_mtx_.unlock();
 }
 
 void RecorderNode::img_detected_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
-    auto cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
+    const auto cv_ptr = cv_bridge::toCvShare(msg, "bgr8");
+    if (cv_ptr->image.empty()) {
+        RCLCPP_WARN(get_logger(), "img_detected_callback() get an empty frame, ignoring");
+        return;
+    }
+    cv::Mat image = cv_ptr->image.clone();
+
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
     DebugInfo::SharedPtr debug_info_msg = nullptr;
@@ -176,14 +190,14 @@ void RecorderNode::img_detected_callback(const sensor_msgs::msg::Image::SharedPt
     shoot_pos_que_mtx_.unlock();
 
     if (debug_info_msg) {
-        draw_info_on_img(debug_info_msg, cv_ptr->image);
+        draw_info_on_img(debug_info_msg, image);
     }
     if (shoot_pos_msg) {
-        draw_info_on_img(shoot_pos_msg, cv_ptr->image);
+        draw_info_on_img(shoot_pos_msg, image);
     }
 
     video_writer_verbose_mtx_.lock();
-    video_writer_verbose_ << cv_ptr->image;
+    video_writer_verbose_ << image;
     video_writer_verbose_mtx_.unlock();
 }
 

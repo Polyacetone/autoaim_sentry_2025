@@ -88,35 +88,34 @@ private:
     std::vector<int> enemy_priority_;
     bool is_enemy_can_shoot_[10] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 
-    std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
-    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+    std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+    std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+    std::unique_ptr<PnPSolver> pnp_solver_;
+    std::unique_ptr<Tracker> tracker_;
 
-    std::shared_ptr<rclcpp::Subscription<DetectionArray>> detection_sub_;
-    std::shared_ptr<rclcpp::Subscription<CameraInfo>> camera_info_sub_;
-    std::shared_ptr<rclcpp::Subscription<RobotColor>> robot_color_sub_;
-    std::shared_ptr<rclcpp::Subscription<BulletSpeed>> bullet_speed_sub_;
-    std::shared_ptr<rclcpp::Subscription<EnemyPriority>> enemy_priority_sub_;
-    std::shared_ptr<rclcpp::Subscription<CompRobotsHp>> robots_hp_sub_;
+    rclcpp::Subscription<DetectionArray>::SharedPtr detection_sub_;
+    rclcpp::Subscription<CameraInfo>::SharedPtr camera_info_sub_;
+    rclcpp::Subscription<RobotColor>::SharedPtr robot_color_sub_;
+    rclcpp::Subscription<BulletSpeed>::SharedPtr bullet_speed_sub_;
+    rclcpp::Subscription<EnemyPriority>::SharedPtr enemy_priority_sub_;
+    rclcpp::Subscription<CompRobotsHp>::SharedPtr robots_hp_sub_;
 
-    std::shared_ptr<rclcpp::Publisher<ShootPos>> shoot_pos_pub_;
-    std::shared_ptr<rclcpp::Publisher<DebugInfo>> debug_info_pub_;
-
-    std::shared_ptr<PnPSolver> pnp_solver_;
-    std::shared_ptr<Tracker> tracker_;
+    rclcpp::Publisher<ShootPos>::SharedPtr shoot_pos_pub_;
+    rclcpp::Publisher<DebugInfo>::SharedPtr debug_info_pub_;
 };
 
 PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
     Node("autoaim_prediction", options) {
-    tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
-    tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
-    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+    tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
+    tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
+    tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
 
-    pnp_solver_ = std::make_shared<PnPSolver>();
+    pnp_solver_ = std::make_unique<PnPSolver>();
     std::string tracker_params_path =
         ament_index_cpp::get_package_share_directory("autoaim_prediction")
         + "/config/tracker_params.yaml";
-    tracker_ = std::make_shared<Tracker>(tracker_params_path);
+    tracker_ = std::make_unique<Tracker>(tracker_params_path);
 
     get_parameters();
 }

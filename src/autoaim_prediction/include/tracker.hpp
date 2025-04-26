@@ -59,9 +59,9 @@ private:
     int CONVERGE_FRAMES = 5;
     int OUTPOST_MAX_LOST_FRAMES = 40;
 
-    std::shared_ptr<KFXYZ> kf_xyz_;
-    std::shared_ptr<KFYaw> kf_yaw_;
-    std::shared_ptr<UKFXY> ukf_;
+    std::unique_ptr<KFXYZ> kf_xyz_;
+    std::unique_ptr<KFYaw> kf_yaw_;
+    std::unique_ptr<UKFXY> ukf_;
     unsigned track_frames_ = 0; // 从不为LOST开始时一直跟踪的帧数
     unsigned appear_frames_ = 0; // 从不为TEMP_LOST开始时连续出现的帧数
     unsigned lost_frames_ = 0; // 从TEMP_LOST或LOST开始时连续消失的帧数
@@ -80,9 +80,9 @@ private:
 
 Tracker::Tracker(const std::string& params_path) {
     load_params(params_path);
-    kf_xyz_ = std::make_shared<KFXYZ>(params_path);
-    kf_yaw_ = std::make_shared<KFYaw>(params_path);
-    ukf_ = std::make_shared<UKFXY>(params_path);
+    kf_xyz_ = std::make_unique<KFXYZ>(params_path);
+    kf_yaw_ = std::make_unique<KFYaw>(params_path);
+    ukf_ = std::make_unique<UKFXY>(params_path);
 }
 
 void Tracker::push(const geometry_msgs::msg::Transform& transform) {

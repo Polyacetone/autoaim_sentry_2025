@@ -126,8 +126,8 @@ void OpenVINOInferEngine::postprocess() {
 
         hw_sentry_interfaces::msg::Detection detection;
         detection.confidence = confidence;
-        detection.color = class_id % 3; // blue, red, gray
-        detection.label = class_id / 3; // S, 1, 2, 3, 4, outpost, basesmall, basebig
+        detection.color = class_id / 8; // blue, red, gray
+        detection.label = class_id % 8; // S, 1, 2, 3, 4, outpost, basesmall, basebig
         detection.tl.x = row.at<float>(0, 28);
         detection.tl.y = row.at<float>(0, 29);
         detection.bl.x = row.at<float>(0, 30);
@@ -142,7 +142,13 @@ void OpenVINOInferEngine::postprocess() {
     cv::dnn::NMSBoxes(boxes, confidences, conf_threshold, nms_threshold, indices);
     detection_arr.clear();
     for(const auto index: indices) {
-        detection_arr.emplace_back(detections_before_nms[index]);
+        const auto det = detections_before_nms[index];
+        // 过滤角点回归到画面外的情况
+        if (det.tl.x < 0 || det.tl.y < 0) continue;
+        if (det.tr.x > input_image_width || det.tr.y < 0) continue;
+        if (det.bl.x < 0 || det.bl.y > input_image_height) continue;
+        if (det.br.x > input_image_width || det.br.y > input_image_height) continue;
+        detection_arr.emplace_back(det);
     }
 }
 

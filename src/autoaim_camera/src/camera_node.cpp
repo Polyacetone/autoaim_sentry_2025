@@ -32,8 +32,6 @@ private:
     void capture_thread();
     bool catch_error(int ret, const char* description);
 
-    sensor_msgs::msg::Image image_msg_;
-    sensor_msgs::msg::CameraInfo camera_info_msg_;
     image_transport::CameraPublisher camera_pub_;
     std::unique_ptr<camera_info_manager::CameraInfoManager> camera_info_manager_;
 
@@ -92,7 +90,6 @@ void CameraNode::get_parameters() {
         std::make_unique<camera_info_manager::CameraInfoManager>(this, camera_name_);
     if (camera_info_manager_->validateURL(camera_info_url)) {
         camera_info_manager_->loadCameraInfo(camera_info_url);
-        camera_info_msg_ = camera_info_manager_->getCameraInfo();
     } else {
         RCLCPP_ERROR(this->get_logger(), "Invalid camera info URL: %s", camera_info_url.c_str());
     }
@@ -102,38 +99,50 @@ void CameraNode::get_parameters() {
 }
 
 void CameraNode::capture_thread() {
+    sensor_msgs::msg::Image image_msg;
+    sensor_msgs::msg::CameraInfo camera_info_msg;
     MV_FRAME_OUT out_frame;
-    image_msg_.header.frame_id = "camera_optical_frame";
-    image_msg_.encoding = "rgb8";
+    image_msg.header.frame_id = "camera_optical_frame";
+    image_msg.encoding = "bgr8";
+    camera_info_msg = camera_info_manager_->getCameraInfo();
     while (rclcpp::ok()) {
-        const int ret_val = MV_CC_GetImageBuffer(cam_handle_, &out_frame, 1000);
-        image_msg_.header.stamp = this->now();
-        if (ret_val == MV_OK) {
-            pixel_convert_param_.pDstBuffer = image_msg_.data.data();
-            pixel_convert_param_.nDstBufferSize = image_msg_.data.size();
-            pixel_convert_param_.pSrcData = out_frame.pBufAddr;
-            pixel_convert_param_.nSrcDataLen = out_frame.stFrameInfo.nFrameLen;
-            pixel_convert_param_.enSrcPixelType = out_frame.stFrameInfo.enPixelType;
+        const int ret_val = MV_CC_GetImageBuffer(cam_handle_, &out_frame, 100);
+        image_msg.header.stamp = this->now();
+        camera_info_msg.header = image_msg.header;
 
-            MV_CC_ConvertPixelType(cam_handle_, &pixel_convert_param_);
-
-            image_msg_.height = out_frame.stFrameInfo.nHeight;
-            image_msg_.width = out_frame.stFrameInfo.nWidth;
-            image_msg_.step = out_frame.stFrameInfo.nWidth * 3;
-            image_msg_.data.resize(image_msg_.width * image_msg_.height * 3);
-
-            camera_info_msg_.header = image_msg_.header;
-            camera_pub_.publish(image_msg_, camera_info_msg_);
-
-            MV_CC_FreeImageBuffer(cam_handle_, &out_frame);
-
-            if (enable_fps_) {
-                RCLCPP_INFO(this->get_logger(), "Camera FPS: %.0f", get_fps());
-            }
-        } else {
+        if (ret_val != MV_OK) {
             RCLCPP_ERROR(this->get_logger(), "Get buffer failed! ret_val: [%x]", ret_val);
             MV_CC_StopGrabbing(cam_handle_);
             MV_CC_StartGrabbing(cam_handle_);
+            continue;
+        }
+
+        // 1440*864, BGR8
+        const cv::Mat capture_frame(
+            cv::Size(out_frame.stFrameInfo.nWidth, out_frame.stFrameInfo.nHeight),
+            CV_8UC3
+        );
+        std::copy(
+            out_frame.pBufAddr,
+            out_frame.pBufAddr + out_frame.stFrameInfo.nFrameLen + 1,
+            capture_frame.data
+        );
+        MV_CC_FreeImageBuffer(cam_handle_, &out_frame);
+
+        // 1440*864 -> 640*384
+        cv::Mat resized_img;
+        cv::resize(capture_frame, resized_img, cv::Size(640, 384), 0, 0, cv::INTER_LINEAR);
+
+        image_msg.height = resized_img.rows;
+        image_msg.width = resized_img.cols;
+        image_msg.step = image_msg.width * 3;
+        image_msg.data.resize(image_msg.width * image_msg.height * 3);
+        std::copy(resized_img.data, resized_img.data + image_msg.data.size() + 1, image_msg.data.data());
+        
+        camera_pub_.publish(image_msg, camera_info_msg);
+
+        if (enable_fps_) {
+            RCLCPP_INFO(this->get_logger(), "Camera FPS: %.0f", get_fps());
         }
     }
 }
@@ -174,18 +183,15 @@ void CameraNode::open_cam() {
 }
 
 void CameraNode::start_grabbing() {
-    // 合并相邻像素，1440*1080 -> 720*540
-    catch_error(MV_CC_SetEnumValue(cam_handle_, "BinningHorizontal", 2), "set binning horizontal");
-    catch_error(MV_CC_SetEnumValue(cam_handle_, "BinningVertical", 2), "set binning vertical");
-
     // 设置像素格式
     catch_error(MV_CC_SetEnumValue(cam_handle_, "PixelFormat", PixelType_Gvsp_BGR8_Packed), "set pixel format");
 
-    // 设置分辨率（适当裁切，与模型输入大小匹配）
-    catch_error(MV_CC_SetIntValue(cam_handle_, "Width", 640), "set width");
-    catch_error(MV_CC_SetIntValue(cam_handle_, "Height", 384), "set height");
-    catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetX", 40), "set offset x");
-    catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetY", 124), "set offset y");
+    // 设置分辨率（MV-CS016-10UC最大1440*1080）
+    // 裁掉上面1/5是因为传1440*1080占满带宽了只有80帧
+    catch_error(MV_CC_SetIntValue(cam_handle_, "Width", 1440), "set width");
+    catch_error(MV_CC_SetIntValue(cam_handle_, "Height", 864), "set height");
+    catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetX", 0), "set offset x");
+    catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetY", 216), "set offset y");
 
     // 启用自动gamma
     catch_error(MV_CC_SetBoolValue(cam_handle_, "GammaEnable", true), "set gamma enable");
@@ -213,12 +219,6 @@ void CameraNode::start_grabbing() {
         catch_error(MV_CC_SetBoolValue(cam_handle_, "AcquisitionFrameRateEnable", true), "set frame rate enable");
         catch_error(MV_CC_SetFloatValue(cam_handle_, "AcquisitionFrameRate", frame_rate_), "set frame rate");
     }
-
-    // 设置BGR转RGB
-    catch_error(MV_CC_GetImageInfo(cam_handle_, &img_info_), "get image info");
-    pixel_convert_param_.nWidth = img_info_.nWidthValue;
-    pixel_convert_param_.nHeight = img_info_.nHeightValue;
-    pixel_convert_param_.enDstPixelType = PixelType_Gvsp_RGB8_Packed;
 
     // 开始取流
     catch_error(MV_CC_StartGrabbing(cam_handle_), "start grabbing");

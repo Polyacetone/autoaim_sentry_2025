@@ -42,16 +42,16 @@ private:
     void img_callback(const sensor_msgs::msg::Image::SharedPtr msg);
     void camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg);
 
-    std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
-    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+    std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+    std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+    std::unique_ptr<PnPSolver> pnp_solver_;
 
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr img_sub_;
     rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_sub_;
     rclcpp::Subscription<hw_sentry_interfaces::msg::BulletSpeed>::SharedPtr bullet_speed_sub_;
     rclcpp::Publisher<hw_sentry_interfaces::msg::ShootPos>::SharedPtr shoot_pos_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_detected_pub_;
-    std::shared_ptr<PnPSolver> pnp_solver_;
 
     bool enable_anti_dart_, enable_detected_image_;
     float target_to_light_z_;
@@ -59,10 +59,10 @@ private:
 };
 
 AntiDartNode::AntiDartNode(const rclcpp::NodeOptions& options): Node("autoaim_anti_dart", options) {
-    tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
+    tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
-    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-    pnp_solver_ = std::make_shared<PnPSolver>();
+    tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
+    pnp_solver_ = std::make_unique<PnPSolver>();
     get_parameters();
 }
 

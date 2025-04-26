@@ -73,7 +73,7 @@ private:
         return math::d2r((label == 5) ? -15 : 15);
     }
     bool is_big_armor(int label) const {
-        return (label == 1);
+        return (label == 1 || label == 7);
     }
 
     static constexpr int FIND_ANGLE_ITERATIONS = 12; // 三分法迭代次数，理想精度<1

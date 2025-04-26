@@ -101,13 +101,14 @@ public:
         Eigen::MatrixXf S = H_ * P_ * H_.transpose() + R_;
         Eigen::MatrixXf K = P_ * H_.transpose() * S.inverse();
         x_ += K * y;
-        Eigen::MatrixXf I = Eigen::MatrixXf::Identity(2, 2);
-        P_ = (I - K * H_) * P_;
+        // 角度限幅
         if (x_(0) < -M_PI) {
             x_(0) += M_PI * 2;
         } else if (x_(0) > M_PI) {
             x_(0) -= M_PI * 2;
         }
+        Eigen::MatrixXf I = Eigen::MatrixXf::Identity(2, 2);
+        P_ = (I - K * H_) * P_;
         set_output_result();
     }
 
@@ -115,6 +116,12 @@ public:
         F_.setIdentity();
         F_(0, 1) = time_elapsed;
         x_ = F_ * x_;
+        // 角度限幅
+        if (x_(0) < -M_PI) {
+            x_(0) += M_PI * 2;
+        } else if (x_(0) > M_PI) {
+            x_(0) -= M_PI * 2;
+        }
         P_ = F_ * P_ * F_.transpose() + Q_;
         set_output_result();
     }
