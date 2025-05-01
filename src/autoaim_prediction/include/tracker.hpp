@@ -1,6 +1,6 @@
 // 维护一个整车状态的跟踪器
 // KFXYZ用于平动，KFYaw+UKFXY用于小陀螺，半径和高度采用惯性滤波
-// 坐标系定义：除相机系（这里应该没涉及）外，其余都是向右x，向前y，向上z
+// 坐标系定义：前x，左y，上z
 // yaw角方向定义：逆时针（即从x到y）为正
 // 距离和时间均使用国际单位制（m、s），角度使用弧度制
 
@@ -68,7 +68,10 @@ private:
     unsigned observing_armor_id_ = 0; // 正在观测的装甲板编号。定义第一块看到的装甲板为0，车逆时针转时看到的依次编号1、2、3
     float radius_[2]; // radius_[0]对应0、2装甲板半径，radius_[1]对应1、3
     float height_[2]; // height_[0]对应0、2装甲板中心z坐标，height_[1]对应1、3
+    float accumulated_yaw_ = 0; // 根据帧间差累计的yaw角，用于更新kf_yaw_
 
+    double prev_update_time_ = 0;
+    float prev_update_angle_ = 0;
     int target_label_; // 当前正在跟踪的目标编号，用于特判前哨站
     std::vector<Armor> armors_;
 
@@ -105,8 +108,7 @@ void Tracker::push(const geometry_msgs::msg::Transform& transform) {
 void Tracker::update(const double time_stamp, const int label) {
     target_label_ = label;
     using TS = TRACKER_STATUS;
-    static double prev = time_stamp;
-    const float time_elapsed = static_cast<float>(time_stamp - prev); // 和上一帧比经过的时间
+    const float time_elapsed = static_cast<float>(time_stamp - prev_update_time_); // 和上一帧比经过的时间
 
     if (tracker_status != TS::LOST) {
         track_frames_++;
@@ -142,38 +144,38 @@ void Tracker::update(const double time_stamp, const int label) {
             observing_armor_id_ = 0;
             radius_[0] = radius_[1] = radius;
             height_[0] = height_[1] = armors_[0].center.z;
+            accumulated_yaw_ = prev_update_angle_ = armors_[0].angle;
         } else { // 正常预测并更新
             kf_xyz_->predict(time_elapsed);
             kf_yaw_->predict(time_elapsed);
             ukf_->predict(time_elapsed);
-            // 限制残差，即theta观测值和状态量theta的差距不应该超过180°
-            // 例如179°和-179°实际只有2°残差
-            if (armors_[0].angle - kf_yaw_->yaw > M_PI) {
-                armors_[0].angle -= M_PI * 2;
-            } else if (armors_[0].angle - kf_yaw_->yaw < -M_PI) {
-                armors_[0].angle += M_PI * 2;
-            }
-            if (armors_[0].angle - kf_yaw_->yaw < -SWITCH_ARMOR_ANGLE) { // 逆时针转（角速度大于0）时切换装甲板
-                observing_armor_id_++;
+            float delta_angle = math::rad_period_correction(armors_[0].angle - prev_update_angle_);
+            accumulated_yaw_ += delta_angle;
+            if (delta_angle < -SWITCH_ARMOR_ANGLE) {
+                // 逆时针转（角速度大于0）时切换装甲板
+                observing_armor_id_ += 1;
                 observing_armor_id_ %= 4;
-                kf_yaw_->force_change_yaw(armors_[0].angle);
+                accumulated_yaw_ += M_PI / 2;
                 kf_xyz_->force_change_position(armors_[0].center);
-            } else if (armors_[0].angle - kf_yaw_->yaw > SWITCH_ARMOR_ANGLE) { // 顺时针转（角速度小于0）时切换装甲板
+            } else if (delta_angle > SWITCH_ARMOR_ANGLE) {
+                // 顺时针转（角速度小于0）时切换装甲板
                 observing_armor_id_ += 3;
                 observing_armor_id_ %= 4;
-                kf_yaw_->force_change_yaw(armors_[0].angle);
+                accumulated_yaw_ -= M_PI / 2;
                 kf_xyz_->force_change_position(armors_[0].center);
             }
             kf_xyz_->update(armors_[0].center);
-            kf_yaw_->update(armors_[0].angle);
+            kf_yaw_->update(accumulated_yaw_);
             update_radius();
             update_height();
             const float radius = is_outpost() ? OUTPOST_RADIUS : radius_[observing_armor_id_ % 2];
+            // 计算车的中心时应直接用观测量armors_[0].angle而非update_angle
             const cv::Point2f car_center(
                 armors_[0].center.x + radius * cos(armors_[0].angle),
                 armors_[0].center.y + radius * sin(armors_[0].angle)
             );
             ukf_->update(car_center);
+            prev_update_angle_ = armors_[0].angle;
         }
         if (track_frames_ >= CONVERGE_FRAMES) {
             tracker_status = TS::TRACKING;
@@ -183,7 +185,7 @@ void Tracker::update(const double time_stamp, const int label) {
     }
 
     armors_.clear();
-    prev = time_stamp;
+    prev_update_time_ = time_stamp;
 }
 
 std::tuple<cv::Point3f, bool> Tracker::get_target_pos(

@@ -272,7 +272,7 @@ void RecorderNode::draw_info_on_img(const DebugInfo::SharedPtr msg, cv::Mat& img
     
         std::sprintf(
             buf,
-            "YAW: (%4.0f) += (%4.0f)",
+            "YAW: (%6.0f) += (%4.0f)",
             r2d(msg->kf_yaw),
             r2d(msg->kf_yaw_palstance)
         );

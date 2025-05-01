@@ -80,9 +80,9 @@ private:
     static constexpr float DETECTOR_ERROR_PIXEL_BY_SLOPE = 2.0;
 
     // 单位: 米
-    static constexpr float HEIGHT = 0.055;
-    static constexpr float BIG_WIDTH = 0.2253;
-    static constexpr float SMALL_WIDTH = 0.135;
+    static constexpr float HEIGHT = 0.05603;
+    static constexpr float BIG_WIDTH = 0.231;
+    static constexpr float SMALL_WIDTH = 0.136;
     // 装甲板坐标系：前x，左y，上z
     const std::vector<cv::Point3f> SMALL_POINTS {
         {0, SMALL_WIDTH / 2, HEIGHT / 2},
