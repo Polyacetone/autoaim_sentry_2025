@@ -1,7 +1,7 @@
 #pragma once
 
 #include <tuple>
-#include <math.h>
+#include <cmath>
 
 #include <math_utils.hpp>
 

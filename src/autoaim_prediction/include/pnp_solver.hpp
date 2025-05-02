@@ -3,9 +3,9 @@
 #include <Eigen/Dense>
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/eigen.hpp>
-#include <tf2/convert.h>
-#include <tf2/LinearMath/Quaternion.h>
-#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2/convert.hpp>
+#include <tf2/LinearMath/Quaternion.hpp>
+#include <tf2/LinearMath/Matrix3x3.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <hw_sentry_interfaces/msg/detection.hpp>
 #include <math_utils.hpp>

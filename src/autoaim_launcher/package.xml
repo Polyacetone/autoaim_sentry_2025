@@ -3,9 +3,9 @@
 <package format="3">
   <name>autoaim_launcher</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Launcher node</description>
   <maintainer email="mitsuha.2213@gmail.com">Polyacetone</maintainer>
-  <license>TODO: License declaration</license>
+  <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 

@@ -411,33 +411,6 @@ void PredictionNode::select_armors(const std::vector<Detection>& src, std::vecto
     center_x_prev = get_center_x(dst[0]);
 }
 
-std::tuple<float, float, float> PredictionNode::get_gimbal_ypr(const rclcpp::Time& time_point) const {
-    // 保存之前找过的ypr，在lookupTransform出现异常时返回
-    static std::tuple<float, float, float> prev_ypr = std::make_tuple(0, 0, 0);
-    geometry_msgs::msg::Transform transform;
-    try {
-        transform = tf_buffer_->lookupTransform("chassis", "gimbal_pitch", time_point).transform;
-    } catch (const std::exception& ex) {
-        RCLCPP_WARN(
-            get_logger(),
-            "Failed to get transform from gimbal_pitch to chassis: %s",
-            ex.what()
-        );
-        return prev_ypr;
-    }
-    double yaw, pitch, roll;
-    tf2::Quaternion quat(
-        transform.rotation.x,
-        transform.rotation.y,
-        transform.rotation.z,
-        transform.rotation.w
-    );
-    tf2::Matrix3x3 rot_mat(quat);
-    rot_mat.getEulerYPR(yaw, pitch, roll);
-    prev_ypr = std::make_tuple(yaw, pitch, roll);
-    return std::make_tuple(yaw, pitch, roll);
-}
-
 geometry_msgs::msg::Transform PredictionNode::try_get_transform(
     const std::string& target,
     const std::string& source,
@@ -454,6 +427,28 @@ geometry_msgs::msg::Transform PredictionNode::try_get_transform(
         }
     }
     throw std::runtime_error("try_get_transform failed after 100 attempts");
+}
+
+std::tuple<float, float, float> PredictionNode::get_gimbal_ypr(const rclcpp::Time& time_point) const {
+    // 保存之前找过的ypr，在lookupTransform出现异常时返回
+    static std::tuple<float, float, float> prev_ypr = std::make_tuple(0, 0, 0);
+    geometry_msgs::msg::Transform transform;
+    try {
+        transform = try_get_transform("chassis", "gimbal_pitch", time_point);
+    } catch (const std::exception& ex) {
+        return prev_ypr;
+    }
+    double yaw, pitch, roll;
+    tf2::Quaternion quat(
+        transform.rotation.x,
+        transform.rotation.y,
+        transform.rotation.z,
+        transform.rotation.w
+    );
+    tf2::Matrix3x3 rot_mat(quat);
+    rot_mat.getEulerYPR(yaw, pitch, roll);
+    prev_ypr = std::make_tuple(yaw, pitch, roll);
+    return std::make_tuple(yaw, pitch, roll);
 }
 
 void PredictionNode::get_debug_info(DebugInfo& msg) {

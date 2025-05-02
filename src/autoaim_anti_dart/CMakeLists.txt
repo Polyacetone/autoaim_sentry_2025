@@ -17,6 +17,7 @@ rclcpp_components_register_node(${PROJECT_NAME}
 )
 
 ament_auto_package(
+  USE_SCOPED_HEADER_INSTALL_DIR
   INSTALL_TO_SHARE
   config
   launch

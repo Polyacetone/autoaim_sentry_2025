@@ -1,8 +1,8 @@
 #include <deque>
 #include <opencv2/opencv.hpp>
 #include <rclcpp/rclcpp.hpp>
-#include <cv_bridge/cv_bridge.h>
-#include <message_filters/cache.h>
+#include <cv_bridge/cv_bridge.hpp>
+#include <message_filters/cache.hpp>
 
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <sensor_msgs/msg/image.hpp>
@@ -240,11 +240,14 @@ void RecorderNode::draw_info_on_img(const DebugInfo::SharedPtr msg, cv::Mat& img
 
     // 左下角画跟踪器具体信息
     if (msg->tracker_status != 3) {
-        if (msg->appear_frames > 0) {
-            std::sprintf(buf, "appear_cnt: %5d", msg->appear_frames);
+        if (msg->tracker_status == 0) { // converging
+            std::sprintf(buf, "converging_cnt: %5d", msg->current_status_frames);
             text_left_align(img, buf, Point(0, 320), WHITE);
-        } else {
-            std::sprintf(buf, "lost_cnt: %5d", msg->lost_frames);
+        } else if (msg->tracker_status == 1) { // tracking
+            std::sprintf(buf, "tracking_cnt: %5d", msg->current_status_frames);
+            text_left_align(img, buf, Point(0, 320), GREEN);
+        } else if (msg->tracker_status == 1) { // temp_lost
+            std::sprintf(buf, "temp_lost_cnt: %5d", msg->current_status_frames);
             text_left_align(img, buf, Point(0, 320), RED);
         }
     
