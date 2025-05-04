@@ -4,7 +4,7 @@
     detection_topic: "autoaim/detection"
     image_detected_topic: "autoaim/detected_image"
 
-    model_path: "20250426v11.xml"
+    model_path: "20250503v11.xml"
     confidence_threshold: 0.4
     nms_threshold: 0.4
 

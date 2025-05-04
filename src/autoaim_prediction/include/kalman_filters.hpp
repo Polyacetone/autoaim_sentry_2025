@@ -10,7 +10,13 @@
 
 class KFXYZ {
 public:
-    KFXYZ(const std::string& params_path): x_(6), P_(6, 6), F_(6, 6), Q_(6, 6), R_(3, 3), H_(3, 6) {
+    KFXYZ(const std::string& params_path):
+        x_(6),
+        P_(6, 6),
+        F_(6, 6),
+        Q_(6, 6),
+        R_(3, 3),
+        H_(3, 6) {
         load_params(params_path);
         initialize(cv::Point3f(0, 0, 0));
     }
@@ -21,6 +27,7 @@ public:
         P_ *= 1.0;
         H_ << 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0;
         set_output_result();
+        frame_count_ = 0;
     }
 
     void update(const cv::Point3f& meas) {
@@ -31,7 +38,18 @@ public:
         Eigen::MatrixXf K = P_ * H_.transpose() * S.inverse();
         x_ += K * y;
         P_ = (Eigen::MatrixXf::Identity(6, 6) - K * H_) * P_;
+        if (ENABLE_ADAPTIVE && frame_count_ >= ADAPTIVE_START_FRAME) {
+            // Sage-Husa自适应更新测量噪声R
+            Eigen::MatrixXf H_P_Ht = H_ * P_ * H_.transpose();
+            Eigen::MatrixXf y_outer = y * y.transpose();
+            Eigen::MatrixXf R_estimate = y_outer - H_P_Ht;
+            R_estimate = (R_estimate + R_estimate.transpose()) / 2.0f;
+            ensure_positive_semi_definite(R_estimate);
+            R_ = (1 - ADAPTIVE_FORGET_FACTOR) * R_ + ADAPTIVE_FORGET_FACTOR * R_estimate;
+            ensure_positive_semi_definite(R_);
+        }
         set_output_result();
+        frame_count_++;
     }
 
     void predict(float delta_t) {
@@ -44,7 +62,6 @@ public:
         set_output_result();
     }
 
-    // 强制更新状态量中的位置信息
     void force_change_position(const cv::Point3f& meas) {
         x_(0) = meas.x;
         x_(1) = meas.y;
@@ -55,9 +72,14 @@ public:
     cv::Point3f position, velocity;
 
 private:
+    bool ENABLE_ADAPTIVE = false;
+    float ADAPTIVE_FORGET_FACTOR = 0.1;
+    unsigned ADAPTIVE_START_FRAME = 10;
+
     Eigen::VectorXf x_;
     Eigen::MatrixXf P_, F_, Q_, R_;
     Eigen::MatrixXf H_;
+    unsigned frame_count_;
 
     void set_output_result() {
         position.x = x_(0);
@@ -68,6 +90,18 @@ private:
         velocity.z = x_(5);
     }
 
+    void ensure_positive_semi_definite(Eigen::MatrixXf& matrix) {
+        Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> solver(matrix);
+        if (solver.info() != Eigen::Success) return;
+        Eigen::VectorXf eigenvalues = solver.eigenvalues();
+        Eigen::MatrixXf eigenvectors = solver.eigenvectors();
+        for (int i = 0; i < eigenvalues.size(); i++) {
+            eigenvalues[i] = std::max(eigenvalues[i], 0.0f);
+        }
+        matrix = eigenvectors * eigenvalues.asDiagonal() * eigenvectors.transpose();
+        matrix = (matrix + matrix.transpose()) / 2.0f;
+    }
+
     void load_params(const std::string& params_path) {
         cv::FileStorage fs(params_path, cv::FileStorage::READ);
         cv::Mat Q_cv, R_cv;
@@ -75,6 +109,9 @@ private:
         fs["KFXYZ"]["measurement_noise_cov"] >> R_cv;
         cv::cv2eigen(Q_cv, Q_);
         cv::cv2eigen(R_cv, R_);
+        ENABLE_ADAPTIVE = (int)fs["KFXYZ"]["enable_adaptive"] != 0;
+        ADAPTIVE_FORGET_FACTOR = (float)fs["KFXYZ"]["adaptive_forget_factor"];
+        ADAPTIVE_START_FRAME = (int)fs["KFXYZ"]["adaptive_start_frame"];
         fs.release();
     }
 };
