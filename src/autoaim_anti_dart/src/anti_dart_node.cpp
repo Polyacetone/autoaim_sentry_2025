@@ -115,7 +115,7 @@ void AntiDartNode::img_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
     const std::vector<cv::Point2f> detected_pts = detect_points(cv_ptr->image);
     if (enable_detected_image_) {
         for (int i = 0; i < detected_pts.size(); i++) {
-            cv::circle(cv_ptr->image, detected_pts[i], 3, cv::Scalar(0, 0, 255), -1);
+            cv::drawMarker(cv_ptr->image, detected_pts[i], cv::Scalar(0, 0, 255), 0, 4, 2);
         }
         sensor_msgs::msg::Image::SharedPtr img_detected =
             cv_bridge::CvImage(msg->header, "bgr8", cv_ptr->image).toImageMsg();
@@ -175,16 +175,17 @@ std::vector<cv::Point2f> AntiDartNode::detect_points(const cv::Mat& img) const {
     Mat hsv, green_mask;
     cvtColor(img, hsv, COLOR_BGR2HSV);
     inRange(hsv, Scalar(40, 120, 60), Scalar(80, 255, 200), green_mask);
-    morphologyEx(green_mask, green_mask, MORPH_CLOSE, getStructuringElement(MORPH_ELLIPSE, Size(15,15)));
+    morphologyEx(green_mask, green_mask, MORPH_CLOSE, getStructuringElement(MORPH_ELLIPSE, Size(15, 15)));
 
     vector<vector<Point>> contours;
     vector<Vec4i> hierarchy;
     findContours(green_mask, contours, hierarchy, RETR_CCOMP, CHAIN_APPROX_SIMPLE);
 
     for (int i = 0; i < contours.size(); i++) {
+        // 是一个轮廓的子轮廓，但没有兄弟轮廓和和自己的子轮廓。为了识别绿色圆圈内的过曝部分
         if (hierarchy[i][0] == -1 && hierarchy[i][1] == -1 && hierarchy[i][2] == -1 && hierarchy[i][3] != -1) {
             float area = contourArea(contours[i]);
-            if (area < 200) continue; // 面积要大于一定值
+            if (area < 10) continue; // 面积要大于一定值
 
             float perimeter = arcLength(contours[i], true);
             float circularity = (4 * CV_PI * area) / (perimeter * perimeter);
@@ -193,13 +194,32 @@ std::vector<cv::Point2f> AntiDartNode::detect_points(const cv::Mat& img) const {
             RotatedRect ellipse = fitEllipse(contours[i]);
             Point2f center = ellipse.center;
             cv::Vec3b pixel = img.at<cv::Vec3b>(center.y, center.x);
-            if (pixel[0] + pixel[1] + pixel[2] < 240 * 3) continue; // 中心点要很亮（过曝）
+            if (pixel[0] + pixel[1] + pixel[2] < 220 * 3) continue; // 中心点要很亮（过曝）
 
-            Point2f u(center.x, center.y - ellipse.size.height / 2);
-            Point2f d(center.x, center.y + ellipse.size.height / 2);
-            Point2f l(center.x - ellipse.size.width / 2, center.y);
-            Point2f r(center.x + ellipse.size.width / 2, center.y);
-            return vector<Point2f>{u, l, d, r};
+            const float radius = (ellipse.size.height + ellipse.size.width) / 4;
+            if (center.x <= radius || center.y <= radius) continue;
+            if (center.x >= img.cols - radius || center.y >= img.rows - radius) continue;
+
+            Mat roi = img(Rect(center.x - radius, center.y - radius, radius * 2, radius * 2));
+            resize(roi, roi, Size(), 5, 5);
+            // 取roi放大后提取过曝的白色区域，可以让角点更准确
+            Mat over_exposure;
+            inRange(roi, Scalar(200, 200, 200), Scalar(255, 255, 255), over_exposure);
+            morphologyEx(over_exposure, over_exposure, MORPH_OPEN, getStructuringElement(MORPH_ELLIPSE, Size(3, 3)));
+            vector<vector<Point>> over_exposure_contour;
+            findContours(over_exposure, over_exposure_contour, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+            if (over_exposure_contour.size() == 1) {
+                RotatedRect ellipse_precise = fitEllipse(over_exposure_contour[0]);
+                const float radius_precise = (ellipse_precise.size.height + ellipse_precise.size.width) / 4;
+                const Point2f center_precise =
+                    center - Point2f(radius, radius) + ellipse_precise.center / 5;
+
+                Point2f u(center_precise.x, center_precise.y - radius_precise / 5);
+                Point2f d(center_precise.x, center_precise.y + radius_precise / 5);
+                Point2f l(center_precise.x - radius_precise / 5, center_precise.y);
+                Point2f r(center_precise.x + radius_precise / 5, center_precise.y);
+                return vector<Point2f>{u, l, d, r};
+            }
         }
     }
     return vector<Point2f>();
