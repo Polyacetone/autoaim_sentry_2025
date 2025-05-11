@@ -32,9 +32,7 @@
                     modernize-use-nullptr,
                     modernize-use-override,
                     modernize-use-transparent-functors,
-                    readability-braces-around-statements,
                     readability-identifier-naming,
-                    readability-implicit-bool-conversion,
                     readability-qualified-auto,
                     readability-redundant-member-init'
   CheckOptions:
@@ -69,7 +67,6 @@
     - { key: readability-identifier-naming.NamespaceCase,       value: lower_case }
     - { key: readability-identifier-naming.ClassMemberCase,     value: lower_case }
     - { key: readability-identifier-naming.FunctionCase,        value: lower_case }
-    - { key: readability-identifier-naming.VariableCase,        value: lower_case }
     - { key: readability-identifier-naming.MacroDefinitionCase, value: UPPER_CASE }
     - { key: readability-identifier-naming.GlobalConstantCase,  value: UPPER_CASE }
 ...

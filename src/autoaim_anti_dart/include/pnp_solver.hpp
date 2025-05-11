@@ -6,7 +6,7 @@ class PnPSolver {
 public:
     cv::Point3f get_translation(const std::vector<cv::Point2f>& img_points) const {
         std::vector<cv::Mat> rvecs, tvecs;
-        const int solutions = cv::solvePnPGeneric(
+        cv::solvePnPGeneric(
             WORLD_POINTS,
             img_points,
             cam_intrinsic_,

@@ -114,7 +114,7 @@ void AntiDartNode::img_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
     const auto cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
     const std::vector<cv::Point2f> detected_pts = detect_points(cv_ptr->image);
     if (enable_detected_image_) {
-        for (int i = 0; i < detected_pts.size(); i++) {
+        for (size_t i = 0; i < detected_pts.size(); i++) {
             cv::drawMarker(cv_ptr->image, detected_pts[i], cv::Scalar(0, 0, 255), 0, 4, 2);
         }
         sensor_msgs::msg::Image::SharedPtr img_detected =
@@ -181,7 +181,7 @@ std::vector<cv::Point2f> AntiDartNode::detect_points(const cv::Mat& img) const {
     vector<Vec4i> hierarchy;
     findContours(green_mask, contours, hierarchy, RETR_CCOMP, CHAIN_APPROX_SIMPLE);
 
-    for (int i = 0; i < contours.size(); i++) {
+    for (size_t i = 0; i < contours.size(); i++) {
         // 是一个轮廓的子轮廓，但没有兄弟轮廓和和自己的子轮廓。为了识别绿色圆圈内的过曝部分
         if (hierarchy[i][0] == -1 && hierarchy[i][1] == -1 && hierarchy[i][2] == -1 && hierarchy[i][3] != -1) {
             float area = contourArea(contours[i]);

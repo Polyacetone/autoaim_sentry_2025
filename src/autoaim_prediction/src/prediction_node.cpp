@@ -1,13 +1,14 @@
 #include <string>
 
 #include <rclcpp/rclcpp.hpp>
+#include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2_ros/transform_listener.h>
-#include <tf2_ros/buffer.h>
-#include <geometry_msgs/msg/transform_stamped.hpp>
-#include <sensor_msgs/msg/camera_info.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <sensor_msgs/msg/camera_info.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
 #include <hw_sentry_interfaces/msg/detection_array.hpp>
 #include <hw_sentry_interfaces/msg/shoot_pos.hpp>
 #include <hw_sentry_interfaces/msg/robot_color.hpp>
@@ -22,7 +23,6 @@
 
 namespace autoaim_prediction {
 using namespace hw_sentry_interfaces::msg;
-using sensor_msgs::msg::CameraInfo;
 
 double to_sec(builtin_interfaces::msg::Time t) {
     return t.sec + t.nanosec * 1e-9;
@@ -46,7 +46,7 @@ public:
 private:
     void get_parameters();
     void detection_callback(const DetectionArray::SharedPtr msg);
-    void camera_info_callback(const CameraInfo::SharedPtr msg);
+    void camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg);
     void get_debug_info(DebugInfo& msg);
 
     // 接收机器人血量数据，更新is_enemy_can_shoot，用于筛去死掉或无敌的人
@@ -69,13 +69,16 @@ private:
     // 之所以是ypr不是rpy，是因为我们采用的旋转顺序是yaw, pitch, roll。
     std::tuple<float, float, float> get_gimbal_ypr(const rclcpp::Time& time_point) const;
 
+    // 从imu_timestamp_buffer_中获取图像时间戳对应的imu时间戳
+    rclcpp::Time get_corresponding_imu_timestamp(const rclcpp::Time& img_time) const;
+
     bool is_big_armor(int label) const {
         return (label == 1);
     }
 
     bool enable_print_state_;
     bool enable_send_to_serial_;
-    bool enable_self_decision_;
+    bool enable_hard_trigger_;
 
     int target_color_ = -1;
     int target_armor_ = -1;
@@ -88,6 +91,8 @@ private:
     std::vector<int> enemy_priority_;
     bool is_enemy_can_shoot_[10] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 
+    std::deque<rclcpp::Time> imu_timestamp_buffer_;
+
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -95,11 +100,12 @@ private:
     std::unique_ptr<Tracker> tracker_;
 
     rclcpp::Subscription<DetectionArray>::SharedPtr detection_sub_;
-    rclcpp::Subscription<CameraInfo>::SharedPtr camera_info_sub_;
     rclcpp::Subscription<RobotColor>::SharedPtr robot_color_sub_;
     rclcpp::Subscription<BulletSpeed>::SharedPtr bullet_speed_sub_;
     rclcpp::Subscription<EnemyPriority>::SharedPtr enemy_priority_sub_;
     rclcpp::Subscription<CompRobotsHp>::SharedPtr robots_hp_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr imu_timestamp_sub_;
 
     rclcpp::Publisher<ShootPos>::SharedPtr shoot_pos_pub_;
     rclcpp::Publisher<DebugInfo>::SharedPtr debug_info_pub_;
@@ -123,7 +129,8 @@ PredictionNode::PredictionNode(const rclcpp::NodeOptions& options):
 void PredictionNode::get_parameters() {
     enable_print_state_ = declare_parameter("enable_print_state", false);
     enable_send_to_serial_ = declare_parameter("enable_send_to_serial", true);
-    enable_self_decision_ = declare_parameter("enable_self_decision", true);
+    enable_hard_trigger_ = declare_parameter("enable_hard_trigger", false);
+
     auto enemy_priority_int64 = declare_parameter("enemy_priority", std::vector<int64_t> {0, 1, 2, 3, 4});
     for (const auto item: enemy_priority_int64) {
         enemy_priority_.emplace_back(static_cast<int>(item));
@@ -141,14 +148,15 @@ void PredictionNode::get_parameters() {
     std::string bullet_speed_sub_topic = declare_parameter("bullet_speed_sub_topic", "serial/bullet_speed");
     std::string enemy_priority_sub_topic = declare_parameter("enemy_priority_sub_topic", "decision/enemy_priority");
     std::string robots_hp_sub_topic = declare_parameter("robots_hp_topic", "serial/comp_robots_hp");
+    std::string imu_timestamp_topic = declare_parameter("imu_timestamp_topic", "serial/gimbal_joint_state");
 
     std::string debug_info_pub_topic = declare_parameter("debug_info_pub_topic", "autoaim/debug_info");
     std::string shoot_pos_pub_topic = declare_parameter("shoot_pos_pub_topic", "serial/shoot_pos");
 
-    camera_info_sub_ = create_subscription<CameraInfo>(
+    camera_info_sub_ = create_subscription<sensor_msgs::msg::CameraInfo>(
         camera_info_topic,
         rclcpp::SensorDataQoS().keep_last(1),
-        [&](const CameraInfo::SharedPtr msg) { camera_info_callback(msg); }
+        [&](const sensor_msgs::msg::CameraInfo::SharedPtr msg) { camera_info_callback(msg); }
     );
     detection_sub_ = create_subscription<DetectionArray>(
         detection_sub_topic,
@@ -173,6 +181,16 @@ void PredictionNode::get_parameters() {
             }
         }
     );
+    imu_timestamp_sub_ = create_subscription<sensor_msgs::msg::JointState>(
+        imu_timestamp_topic,
+        rclcpp::QoS(1),
+        [&](const sensor_msgs::msg::JointState::SharedPtr msg) {
+            imu_timestamp_buffer_.emplace_front(msg->header.stamp);
+            if (imu_timestamp_buffer_.size() > 10) {
+                imu_timestamp_buffer_.pop_back();
+            }
+        }
+    );
     enemy_priority_sub_ = create_subscription<EnemyPriority>(
         enemy_priority_sub_topic,
         rclcpp::QoS(1),
@@ -194,7 +212,12 @@ void PredictionNode::get_parameters() {
 }
 
 void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
-    std::tuple<float, float, float> gimbal_ypr = get_gimbal_ypr(msg->header.stamp);
+    rclcpp::Time timestamp = msg->header.stamp;
+    if (enable_hard_trigger_) {
+        timestamp = get_corresponding_imu_timestamp(msg->header.stamp);
+    }
+
+    std::tuple<float, float, float> gimbal_ypr = get_gimbal_ypr(timestamp);
     float gimbal_yaw, gimbal_pitch, gimbal_roll;
     std::tie(gimbal_yaw, gimbal_pitch, gimbal_roll) = gimbal_ypr;
     std::vector<Detection> target_armors;
@@ -205,17 +228,18 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
         const Detection& armor = target_armors[i];
         const std::string armor_name = get_tf_armor_name(armor.color, armor.label, i);
         geometry_msgs::msg::TransformStamped armor_to_cam;
-        armor_to_cam.header.stamp = msg->header.stamp;
+        armor_to_cam.header.stamp = timestamp;
         armor_to_cam.header.frame_id = "autoaim_camera";
         armor_to_cam.child_frame_id = armor_name;
         // 计算装甲板相对于相机坐标系的位姿
         if (!pnp_solver_->solve_pnp(armor, gimbal_ypr, armor_to_cam.transform)) {
             continue;
         }
+
         tf_broadcaster_->sendTransform(armor_to_cam);
         // 把装甲板的位姿转换到世界坐标系下进行滤波
         try {
-            auto armor_to_chassis = try_get_transform("chassis", armor_name, msg->header.stamp);
+            auto armor_to_chassis = try_get_transform("chassis", armor_name, timestamp);
             tracker_->push(armor_to_chassis);
         } catch (const std::exception& ex) {
             RCLCPP_WARN(
@@ -226,10 +250,10 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
             );
         }
     }
-    tracker_->update(to_sec(msg->header.stamp), target_armor_);
+    tracker_->update(to_sec(timestamp), target_armor_);
 
     DebugInfo debug_info;
-    debug_info.header.stamp = msg->header.stamp;
+    debug_info.header.stamp = timestamp;
     this->get_debug_info(debug_info);
     tracker_->get_debug_info(debug_info);
     debug_info_pub_->publish(debug_info);
@@ -240,11 +264,11 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
         std::tie(target, can_shoot) = tracker_->get_target_pos(
             gimbal_yaw,
             bullet_speed_,
-            to_sec(now()) - to_sec(msg->header.stamp) + control_to_fire_time_
+            to_sec(now()) - to_sec(timestamp) + control_to_fire_time_
         );
 
         geometry_msgs::msg::TransformStamped target_to_chassis;
-        target_to_chassis.header.stamp = msg->header.stamp;
+        target_to_chassis.header.stamp = timestamp;
         target_to_chassis.header.frame_id = "chassis";
         target_to_chassis.child_frame_id = "target";
         target_to_chassis.transform.translation.x = target.x;
@@ -255,7 +279,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
         geometry_msgs::msg::Transform target_to_fric;
         try {
             // fake_fric是原点在摩擦轮系，但方向和大yaw相同的系。解出来的角度方便控车
-            target_to_fric = try_get_transform("fake_fric", "target", msg->header.stamp);
+            target_to_fric = try_get_transform("fake_fric", "target", timestamp);
         } catch (const std::exception& ex) {
             RCLCPP_WARN(
                 get_logger(),
@@ -291,7 +315,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
         }
         if (enable_send_to_serial_) {
             ShootPos shoot_pos;
-            shoot_pos.header.stamp = msg->header.stamp;
+            shoot_pos.header.stamp = timestamp;
             // 发送给电控的shoot_flag中，0是不发弹，1是单发，2是连发。
             // 一般打人用连发，打符用单发。
             shoot_pos.shoot_flag = can_shoot ? 2 : 0;
@@ -304,8 +328,8 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
 
 void PredictionNode::decide_target_armor(const DetectionArray::SharedPtr msg) {
     static int current_target_lost_frames = 0;
-    static int armor_appear_frames[5][15] = {0};
-    bool occurred_armors[5][15] = {0};
+    static int armor_appear_frames[5][15] = {};
+    bool occurred_armors[5][15] = {};
     if (!msg->detections.empty()) {
         for (const auto& armor: msg->detections) {
             occurred_armors[armor.color][armor.label] = 1;
@@ -436,6 +460,7 @@ std::tuple<float, float, float> PredictionNode::get_gimbal_ypr(const rclcpp::Tim
     try {
         transform = try_get_transform("chassis", "gimbal_pitch", time_point);
     } catch (const std::exception& ex) {
+        RCLCPP_WARN(get_logger(), "Failed to get gimbal ypr: %s", ex.what());
         return prev_ypr;
     }
     double yaw, pitch, roll;
@@ -460,7 +485,7 @@ void PredictionNode::get_debug_info(DebugInfo& msg) {
     }
 }
 
-void PredictionNode::camera_info_callback(const CameraInfo::SharedPtr msg) {
+void PredictionNode::camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg) {
     pnp_solver_->set_cam_matrix(
         cv::Mat(3, 3, CV_64F, msg->k.data()),
         cv::Mat(1, 5, CV_64F, msg->d.data())
@@ -510,6 +535,19 @@ void PredictionNode::robots_hp_callback(const CompRobotsHp::SharedPtr msg) {
             is_enemy_can_shoot_[i] = true;
         }
     }
+}
+
+rclcpp::Time PredictionNode::get_corresponding_imu_timestamp(const rclcpp::Time& img_time) const {
+    if (!imu_timestamp_buffer_.empty()) {
+        for (const auto& stamp: imu_timestamp_buffer_) {
+            const double diff = to_sec(img_time) - to_sec(stamp);
+            if (-2e-3 < diff && diff < 2e-3) {
+                return stamp;
+            }
+        }
+    }
+    RCLCPP_WARN(get_logger(), "Failed to get corresponding imu timestamp near image timestamp.");
+    return img_time;
 }
 } // namespace autoaim_prediction
 

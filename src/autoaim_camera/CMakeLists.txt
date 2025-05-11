@@ -4,7 +4,7 @@ project(autoaim_camera)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-add_compile_options("-Ofast")
+add_compile_options(-Ofast -Wall -Wextra)
 
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()

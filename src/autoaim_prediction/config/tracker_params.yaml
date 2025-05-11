@@ -25,7 +25,7 @@ Tracker:
   outpost_can_shoot_angle: 0.75 # 前哨站跟随并击打的角度范围
 
 KFXYZ:
-  enable_adaptive: 0 # 是否启用Sage-Husa自适应更新测量噪声R
+  enable_adaptive: 1 # 是否启用Sage-Husa自适应更新测量噪声R
   adaptive_forget_factor: 0.2 # 测量噪声R的惯性滤波参数
   adaptive_start_frame: 50 # 开始更新测量噪声的帧数
   process_noise_cov: !!opencv-matrix
@@ -35,9 +35,9 @@ KFXYZ:
     data: [ 1e-0,  0,  0,  0,  0,  0,
             0,  1e-0,  0,  0,  0,  0,
             0,  0,  1e-1,  0,  0,  0,
-            0,  0,  0,  5e+1,  0,  0,
-            0,  0,  0,  0,  5e+1,  0,
-            0,  0,  0,  0,  0,  1e-1 ]
+            0,  0,  0,  1e+2,  0,  0,
+            0,  0,  0,  0,  1e+2,  0,
+            0,  0,  0,  0,  0,  1e-0 ]
   measurement_noise_cov: !!opencv-matrix
     rows: 3
     cols: 3

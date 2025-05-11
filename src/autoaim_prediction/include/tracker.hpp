@@ -53,9 +53,9 @@ private:
     float ANTITOP_CAN_SHOOT_ANGLE = math::d2r(30);
     float ANTITOP_FOLLOW_ANGLE = math::d2r(30);
     float OUTPOST_CAN_SHOOT_ANGLE = math::d2r(60);
-    int MAX_LOST_FRAMES = 5;
-    int CONVERGE_FRAMES = 5;
-    int OUTPOST_MAX_LOST_FRAMES = 40;
+    unsigned MAX_LOST_FRAMES = 5;
+    unsigned CONVERGE_FRAMES = 5;
+    unsigned OUTPOST_MAX_LOST_FRAMES = 40;
 
     std::unique_ptr<KFXYZ> kf_xyz_;
     std::unique_ptr<KFYaw> kf_yaw_;
@@ -265,7 +265,6 @@ void Tracker::update_radius() {
         const float delta_y = armors_[1].center.y - armors_[0].center.y;
         const float theta = armors_[0].angle;
         const float r_first = abs(delta_x * cos(theta) + delta_y * sin(theta));
-        const float r_next = abs(-delta_x * sin(theta) + delta_y * cos(theta));
         if (MIN_RADIUS <= r_first && r_first <= MAX_RADIUS) {
             radius_[index] = RADIUS_FILTER_RATIO * radius_[index]
                 + (1 - RADIUS_FILTER_RATIO) * r_first;
@@ -290,12 +289,13 @@ void Tracker::load_params(const std::string& params_path) {
     fs["Tracker"]["antitop_palstance_threshold"] >> ANTITOP_PALSTANCE_THRESHOLD;
     fs["Tracker"]["antitop_follow_angle"] >> ANTITOP_FOLLOW_ANGLE;
     fs["Tracker"]["antitop_can_shoot_angle"] >> ANTITOP_CAN_SHOOT_ANGLE;
-    fs["Tracker"]["max_lost_frames"] >> MAX_LOST_FRAMES;
-    fs["Tracker"]["converge_frames"] >> CONVERGE_FRAMES;
+    MAX_LOST_FRAMES = (int)fs["Tracker"]["max_lost_frames"];
+    CONVERGE_FRAMES = (int)fs["Tracker"]["converge_frames"];
 
     fs["Tracker"]["outpost_radius"] >> OUTPOST_RADIUS;
-    fs["Tracker"]["outpost_max_lost_frames"] >> OUTPOST_MAX_LOST_FRAMES;
     fs["Tracker"]["outpost_can_shoot_angle"] >> OUTPOST_CAN_SHOOT_ANGLE;
+    OUTPOST_MAX_LOST_FRAMES = (int)fs["Tracker"]["outpost_max_lost_frames"];
+    
     fs.release();
 }
 
@@ -321,7 +321,7 @@ void Tracker::debug_print_state() {
         kf_xyz_->velocity.z * 100
     );
     std::printf(
-        "kf yaw: %5.0f += %3.0f (degree)\n",
+        "kf yaw: [%5.0f] += [%3.0f] (degree)\n",
         math::r2d(kf_yaw_->yaw),
         math::r2d(kf_yaw_->palstance)
     );
@@ -332,8 +332,8 @@ void Tracker::debug_print_state() {
         ukf_->velocity.x * 100,
         ukf_->velocity.y * 100
     );
-    std::printf("radius: %3.0f, %3.0f (cm)\n", radius_[0] * 100, radius_[1] * 100);
-    std::printf("height: %3.0f, %3.0f, %3.0f, %3.0f (cm)\n",
+    std::printf("radius: [%3.0f, %3.0f] (cm)\n", radius_[0] * 100, radius_[1] * 100);
+    std::printf("height: [%3.0f, %3.0f, %3.0f, %3.0f] (cm)\n",
         height_[0] * 100,
         height_[1] * 100,
         height_[2] * 100,

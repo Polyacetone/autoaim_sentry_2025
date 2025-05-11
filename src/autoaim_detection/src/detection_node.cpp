@@ -1,5 +1,9 @@
-#include <infer_engine.hpp>
+#include <rclcpp/rclcpp.hpp>
+#include <opencv2/opencv.hpp>
+#include <cv_bridge/cv_bridge.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
+
+#include <infer_engine.hpp>
 #include <hw_sentry_interfaces/msg/detection_array.hpp>
 
 namespace autoaim_detection {

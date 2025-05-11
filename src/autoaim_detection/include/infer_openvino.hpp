@@ -1,8 +1,6 @@
 #include <omp.h>
 #include <opencv2/opencv.hpp>
 #include <openvino/openvino.hpp>
-#include <rclcpp/rclcpp.hpp>
-#include <cv_bridge/cv_bridge.hpp>
 #include <hw_sentry_interfaces/msg/detection_array.hpp>
 
 struct Config {

@@ -129,7 +129,7 @@ void CameraNode::capture_thread() {
         );
         MV_CC_FreeImageBuffer(cam_handle_, &out_frame);
 
-        // 1440*864 -> 640*384
+        // 1280*768 -> 640*384
         cv::Mat resized_img;
         cv::resize(capture_frame, resized_img, cv::Size(640, 384), 0, 0, cv::INTER_LINEAR);
 
@@ -186,12 +186,11 @@ void CameraNode::start_grabbing() {
     // 设置像素格式
     catch_error(MV_CC_SetEnumValue(cam_handle_, "PixelFormat", PixelType_Gvsp_BGR8_Packed), "set pixel format");
 
-    // 设置分辨率（MV-CS016-10UC最大1440*1080）
-    // 裁掉上面1/5是因为传1440*1080占满带宽了只有80帧
-    catch_error(MV_CC_SetIntValue(cam_handle_, "Width", 1440), "set width");
-    catch_error(MV_CC_SetIntValue(cam_handle_, "Height", 864), "set height");
-    catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetX", 0), "set offset x");
-    catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetY", 216), "set offset y");
+    // 设置分辨率（MV-CS016-10UC最大1440*1080，不过这里取1280*768）
+    catch_error(MV_CC_SetIntValue(cam_handle_, "Width", 1280), "set width");
+    catch_error(MV_CC_SetIntValue(cam_handle_, "Height", 768), "set height");
+    catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetX", (1440-1280)/2), "set offset x");
+    catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetY", (1080-768)), "set offset y");
 
     // 启用自动gamma
     catch_error(MV_CC_SetBoolValue(cam_handle_, "GammaEnable", true), "set gamma enable");

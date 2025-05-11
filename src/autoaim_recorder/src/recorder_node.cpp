@@ -218,7 +218,7 @@ void RecorderNode::draw_info_on_img(const DebugInfo::SharedPtr msg, cv::Mat& img
     const auto text_middle_align = [](const Mat& img, const string& s, const Point& p, const Scalar& c) {
         putText(img, s, Point(p.x - s.size() * 5, p.y), FONT, 0.5, c, 0.5);
     };
-    char buf[64];
+    char buf[128];
 
     // 左上角画时间
     std::sprintf(buf, "T: %.3lf", to_sec(msg->header.stamp) - start_time_);
@@ -283,11 +283,13 @@ void RecorderNode::draw_info_on_img(const DebugInfo::SharedPtr msg, cv::Mat& img
     
         std::sprintf(
             buf,
-            "R: [%4.0f, %4.0f], H: [%4.0f, %4.0f]",
+            "R: [%4.0f, %4.0f], H: [%4.0f, %4.0f, %4.0f, %4.0f]",
             msg->radius[0] * 100,
             msg->radius[1] * 100,
             msg->height[0] * 100,
-            msg->height[1] * 100
+            msg->height[1] * 100,
+            msg->height[2] * 100,
+            msg->height[3] * 100
         );
         text_left_align(img, buf, Point(0, 380), WHITE);
     }
