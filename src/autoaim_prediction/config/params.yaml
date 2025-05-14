@@ -2,7 +2,6 @@
   ros__parameters:
     enable_print_state: true
     enable_send_to_serial: true
-    enable_hard_trigger: true
 
     # 默认的目标敌人优先级序列。收到决策发送的消息后会被覆盖
     enemy_priority: [0, 1, 2, 3, 4, 5]
@@ -21,7 +20,7 @@
     bullet_speed_sub_topic: "serial/bullet_speed"
     robots_hp_topic: "serial/comp_robots_hp" # 从串口节点接收，获取敌方机器人血量筛掉死人和无敌人
     enemy_priority_sub_topic: "decision/enemy_priority" # 从决策接收，指定打人的优先级
-    imu_timestamp_topic: "serial/gimbal_joint_state" # 启用hard_trigger时接收，用于同步串口（imu）时间戳和图像时间戳。只用了header.stamp
 
     shoot_pos_pub_topic: "autoaim/shoot_pos"
+    enemy_position_pub_topic: "autoaim/enemy_position"
     debug_info_pub_topic: "autoaim/debug_info"

@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <Eigen/Dense>
+#include <opencv2/opencv.hpp>
 
 namespace math {
 // 把角度（弧度制）修正到-pi~pi之间

@@ -8,6 +8,10 @@
 
 #include <kalman_filters.hpp>
 #include <math_utils.hpp>
+#include <tf2/LinearMath/Matrix3x3.hpp>
+#include <tf2/LinearMath/Quaternion.hpp>
+
+#include <geometry_msgs/msg/transform.hpp>
 #include <geometry_msgs/msg/point32.hpp>
 #include <hw_sentry_interfaces/msg/debug_info.hpp>
 
@@ -20,7 +24,7 @@ struct Armor {
 
 class Tracker {
 public:
-    Tracker(const std::string& params_path);
+    explicit Tracker(const std::string& params_path);
     void push(const geometry_msgs::msg::Transform& transform);
     void update(const double time_stamp, const int label);
     void debug_print_state();
@@ -40,7 +44,10 @@ public:
         const float img_to_fire_time
     );
 
-    TRACKER_STATUS tracker_status = TRACKER_STATUS::LOST;
+    TRACKER_STATUS tracker_status_ = TRACKER_STATUS::LOST;
+    std::unique_ptr<KFXYZ> kf_xyz_;
+    std::unique_ptr<KFYaw> kf_yaw_;
+    std::unique_ptr<UKFXY> ukf_;
 
 private:
     float INITIAL_RADIUS = 0.26;
@@ -57,9 +64,6 @@ private:
     unsigned CONVERGE_FRAMES = 5;
     unsigned OUTPOST_MAX_LOST_FRAMES = 40;
 
-    std::unique_ptr<KFXYZ> kf_xyz_;
-    std::unique_ptr<KFYaw> kf_yaw_;
-    std::unique_ptr<UKFXY> ukf_;
     unsigned current_status_frames_ = 0; // 当前tracker_status状态的持续帧数
     unsigned observing_armor_id_ = 0; // 正在观测的装甲板编号。定义第一块看到的装甲板为0，车逆时针转时看到的依次编号1、2、3
     float radius_[2]; // radius_[0]对应0、2装甲板半径，radius_[1]对应1、3
@@ -107,16 +111,16 @@ void Tracker::update(const double time_stamp, const int label) {
     const float time_elapsed = static_cast<float>(time_stamp - prev_update_time_); // 和上一帧比经过的时间
 
     if (armors_.empty() || armors_.size() > 2) {
-        if (tracker_status != TS::LOST) { // 短暂失踪，只预测不更新
-            if (tracker_status == TS::CONVERGING) {
-                tracker_status = TS::LOST;
+        if (tracker_status_ != TS::LOST) { // 短暂失踪，只预测不更新
+            if (tracker_status_ == TS::CONVERGING) {
+                tracker_status_ = TS::LOST;
                 current_status_frames_ = 0;
-            } else if (tracker_status == TS::TRACKING) {
-                tracker_status = TS::TEMP_LOST;
+            } else if (tracker_status_ == TS::TRACKING) {
+                tracker_status_ = TS::TEMP_LOST;
                 current_status_frames_ = 0;
-            } else if (tracker_status == TS::TEMP_LOST) {
+            } else if (tracker_status_ == TS::TEMP_LOST) {
                 if (current_status_frames_ > (is_outpost() ? OUTPOST_MAX_LOST_FRAMES : MAX_LOST_FRAMES)) {
-                    tracker_status = TS::LOST;
+                    tracker_status_ = TS::LOST;
                     current_status_frames_ = 0;
                 }
             }
@@ -126,8 +130,8 @@ void Tracker::update(const double time_stamp, const int label) {
         }
         current_status_frames_++;
     } else {
-        if (tracker_status == TS::LOST) { // 初始化
-            tracker_status = TS::CONVERGING;
+        if (tracker_status_ == TS::LOST) { // 初始化
+            tracker_status_ = TS::CONVERGING;
             current_status_frames_ = 0;
             kf_xyz_->initialize(armors_[0].center);
             kf_yaw_->initialize(armors_[0].angle);
@@ -142,12 +146,12 @@ void Tracker::update(const double time_stamp, const int label) {
             height_[0] = height_[1] = height_[2] = height_[3] = armors_[0].center.z;
             accumulated_yaw_ = prev_update_angle_ = armors_[0].angle;
         } else { // 正常预测并更新
-            if (tracker_status == TS::TEMP_LOST) {
-                tracker_status = TS::TRACKING;
+            if (tracker_status_ == TS::TEMP_LOST) {
+                tracker_status_ = TS::TRACKING;
                 current_status_frames_ = 0;
-            } else if (tracker_status == TS::CONVERGING) {
+            } else if (tracker_status_ == TS::CONVERGING) {
                 if (current_status_frames_ > CONVERGE_FRAMES) {
-                    tracker_status = TS::TRACKING;
+                    tracker_status_ = TS::TRACKING;
                     current_status_frames_ = 0;
                 }
             }
@@ -201,7 +205,7 @@ std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
             math::get_distance(kf_xyz_->position + img_to_hit_time_1 * kf_xyz_->velocity) / bullet_speed;
         return std::make_tuple(
             kf_xyz_->position + img_to_hit_time_2 * kf_xyz_->velocity, 
-            tracker_status != TRACKER_STATUS::CONVERGING
+            tracker_status_ != TRACKER_STATUS::CONVERGING
         );
     } else { // 转动，用KFYaw和UKFXY预测
         // 同上，img_to_hit_time为二阶近似
@@ -240,7 +244,7 @@ std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
             );
             const float can_shoot_angle = is_outpost() ? OUTPOST_CAN_SHOOT_ANGLE : ANTITOP_CAN_SHOOT_ANGLE;
             const bool shoot_flag = abs(target_angle_to_gimbal) < can_shoot_angle;
-            return std::make_tuple(target, shoot_flag && tracker_status != TRACKER_STATUS::CONVERGING);
+            return std::make_tuple(target, shoot_flag && tracker_status_ != TRACKER_STATUS::CONVERGING);
         } else { // 去下一块装甲板出现位置准备射击
             const float next_follow_angle_to_world =
                 math::rad_period_correction((kf_yaw_->palstance > 0 ? -1 : 1) * follow_angle + gimbal_yaw);
@@ -302,13 +306,13 @@ void Tracker::load_params(const std::string& params_path) {
 void Tracker::debug_print_state() {
     std::printf("----------\n");
     std::printf("current status: ");
-    if (tracker_status == TRACKER_STATUS::CONVERGING) {
+    if (tracker_status_ == TRACKER_STATUS::CONVERGING) {
         printf("converging, %d\n", current_status_frames_);
-    } else if (tracker_status == TRACKER_STATUS::TRACKING) {
+    } else if (tracker_status_ == TRACKER_STATUS::TRACKING) {
         printf("tracking, %d\n", current_status_frames_);
-    } else if (tracker_status == TRACKER_STATUS::LOST) {
+    } else if (tracker_status_ == TRACKER_STATUS::LOST) {
         printf("lost, %d\n", current_status_frames_);
-    } else if (tracker_status == TRACKER_STATUS::TEMP_LOST) {
+    } else if (tracker_status_ == TRACKER_STATUS::TEMP_LOST) {
         printf("temp_lost, %d\n", current_status_frames_);
     }
     std::printf(
@@ -342,7 +346,7 @@ void Tracker::debug_print_state() {
 }
 
 void Tracker::get_debug_info(hw_sentry_interfaces::msg::DebugInfo& debug_info) {
-    debug_info.tracker_status = static_cast<int>(tracker_status);
+    debug_info.tracker_status = static_cast<int>(tracker_status_);
     debug_info.current_status_frames = current_status_frames_;
     debug_info.observing_armor_id = observing_armor_id_;
     constexpr auto cvpt3_to_tfpt = [](const cv::Point3f& p) {

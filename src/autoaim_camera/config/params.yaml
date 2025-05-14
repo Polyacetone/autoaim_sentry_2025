@@ -8,5 +8,7 @@
     exposure: 500.0
     gain: 16.0
 
-    img_pub_topic: "autoaim/camera/image_raw" # 发布的topic名字
     camera_info_url: "package://autoaim_camera/config/camera_info.yaml" # 相机参数的url
+
+    imu_timestamp_topic: "serial/gimbal_joint_state" # 启用hard_trigger时接收，用于同步串口（imu）时间戳和图像时间戳
+    img_pub_topic: "autoaim/camera/image_raw" # 发布的topic名字

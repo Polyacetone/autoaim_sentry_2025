@@ -213,12 +213,12 @@ void RecorderNode::draw_info_on_img(const DebugInfo::SharedPtr msg, cv::Mat& img
     const Scalar RED(0, 0, 255);
     const auto FONT = FONT_HERSHEY_DUPLEX;
     const auto text_left_align = [](const Mat& img, const string& s, const Point& p, const Scalar& c) {
-        putText(img, s, Point(p.x, p.y), FONT, 0.5, c, 0.5);
+        putText(img, s, Point(p.x, p.y), FONT, 0.5, c);
     };
     const auto text_middle_align = [](const Mat& img, const string& s, const Point& p, const Scalar& c) {
-        putText(img, s, Point(p.x - s.size() * 5, p.y), FONT, 0.5, c, 0.5);
+        putText(img, s, Point(p.x - s.size() * 5, p.y), FONT, 0.5, c);
     };
-    char buf[128];
+    char buf[1024];
 
     // 左上角画时间
     std::sprintf(buf, "T: %.3lf", to_sec(msg->header.stamp) - start_time_);
@@ -283,7 +283,7 @@ void RecorderNode::draw_info_on_img(const DebugInfo::SharedPtr msg, cv::Mat& img
     
         std::sprintf(
             buf,
-            "R: [%4.0f, %4.0f], H: [%4.0f, %4.0f, %4.0f, %4.0f]",
+            "R: [%4.0f, %4.0f], H: [%3.0f, %3.0f, %3.0f, %3.0f]",
             msg->radius[0] * 100,
             msg->radius[1] * 100,
             msg->height[0] * 100,
@@ -301,9 +301,9 @@ void RecorderNode::draw_info_on_img(const ShootPos::SharedPtr msg, cv::Mat& img)
     const Scalar WHITE(255, 255, 255);
     const auto FONT = FONT_HERSHEY_DUPLEX;
     const auto text_left_align = [](const Mat& img, const string& s, const Point& p, const Scalar& c) {
-        putText(img, s, Point(p.x, p.y), FONT, 0.5, c, 0.5);
+        putText(img, s, Point(p.x, p.y), FONT, 0.5, c);
     };
-    char buf[64];
+    char buf[1024];
 
     std::sprintf(buf, "Pitch: %4.1f", r2d(msg->pitch));
     text_left_align(img, buf, Point(530, 350), WHITE);

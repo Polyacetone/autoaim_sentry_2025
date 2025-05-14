@@ -1,5 +1,6 @@
-#include <MvCameraControl.h>
+#include <deque>
 
+#include <MvCameraControl.h>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/utilities.hpp>
@@ -7,10 +8,16 @@
 #include <image_transport/image_transport.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
 
 #include <opencv2/opencv.hpp>
 
 namespace autoaim_camera {
+
+double to_sec(builtin_interfaces::msg::Time t) {
+    return t.sec + t.nanosec * 1e-9;
+}
+
 float get_fps() {
     static auto prev = std::chrono::high_resolution_clock::now();
     auto now = std::chrono::high_resolution_clock::now();
@@ -32,19 +39,21 @@ private:
     void capture_thread();
     bool catch_error(int ret, const char* description);
 
-    image_transport::CameraPublisher camera_pub_;
-    std::unique_ptr<camera_info_manager::CameraInfoManager> camera_info_manager_;
-
-    void* cam_handle_;
-    MV_IMAGE_BASIC_INFO img_info_;
-    MV_CC_PIXEL_CONVERT_PARAM pixel_convert_param_;
-
-    std::thread capture_thread_;
+    // 从imu_timestamp_buffer_中获取图像时间戳对应的imu时间戳
+    rclcpp::Time get_corresponding_imu_timestamp(const rclcpp::Time& img_time) const;
 
     bool enable_fps_;
     bool enable_imu_trigger_;
     std::string camera_name_;
     float exposure_, gain_, frame_rate_;
+
+    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr imu_timestamp_sub_;
+    image_transport::CameraPublisher camera_pub_;
+
+    void* cam_handle_;
+    std::unique_ptr<camera_info_manager::CameraInfoManager> camera_info_manager_;
+    std::deque<rclcpp::Time> imu_timestamp_buffer_;
+    std::thread capture_thread_;
 };
 
 CameraNode::CameraNode(const rclcpp::NodeOptions& options): Node("autoaim_camera", options) {
@@ -78,7 +87,8 @@ bool CameraNode::catch_error(int ret, const char* description) {
 void CameraNode::get_parameters() {
     std::string camera_info_url =
         declare_parameter("camera_info_url", "package://autoaim_camera/config/camera_info.yaml");
-    std::string img_pub_topic_ = declare_parameter("img_pub_topic", "/camera/color/image_raw");
+    std::string img_pub_topic = declare_parameter("img_pub_topic", "/camera/color/image_raw");
+    std::string imu_timestamp_topic = declare_parameter("imu_timestamp_topic", "serial/gimbal_joint_state");
     camera_name_ = declare_parameter("camera_name", "auto");
     enable_fps_ = declare_parameter("enable_fps", false);
     enable_imu_trigger_ = declare_parameter("enable_imu_trigger", false);
@@ -86,8 +96,18 @@ void CameraNode::get_parameters() {
     exposure_ = declare_parameter("exposure", 2000.0);
     gain_ = declare_parameter("gain", 16.0);
 
-    camera_info_manager_ =
-        std::make_unique<camera_info_manager::CameraInfoManager>(this, camera_name_);
+    imu_timestamp_sub_ = create_subscription<sensor_msgs::msg::JointState>(
+        imu_timestamp_topic,
+        rclcpp::QoS(1),
+        [&](const sensor_msgs::msg::JointState::SharedPtr msg) {
+            imu_timestamp_buffer_.emplace_front(msg->header.stamp);
+            if (imu_timestamp_buffer_.size() > 10) {
+                imu_timestamp_buffer_.pop_back();
+            }
+        }
+    );
+
+    camera_info_manager_ = std::make_unique<camera_info_manager::CameraInfoManager>(this, camera_name_);
     if (camera_info_manager_->validateURL(camera_info_url)) {
         camera_info_manager_->loadCameraInfo(camera_info_url);
     } else {
@@ -95,7 +115,7 @@ void CameraNode::get_parameters() {
     }
     rmw_qos_profile_t custom_qos = rmw_qos_profile_sensor_data;
     custom_qos.depth = 1;
-    camera_pub_ = image_transport::create_camera_publisher(this, img_pub_topic_, custom_qos);
+    camera_pub_ = image_transport::create_camera_publisher(this, img_pub_topic, custom_qos);
 }
 
 void CameraNode::capture_thread() {
@@ -107,15 +127,22 @@ void CameraNode::capture_thread() {
     camera_info_msg = camera_info_manager_->getCameraInfo();
     while (rclcpp::ok()) {
         const int ret_val = MV_CC_GetImageBuffer(cam_handle_, &out_frame, 100);
-        image_msg.header.stamp = this->now();
-        camera_info_msg.header = image_msg.header;
+        const rclcpp::Time current_time = this->now();
 
         if (ret_val != MV_OK) {
             RCLCPP_ERROR(this->get_logger(), "Get buffer failed! ret_val: [%x]", ret_val);
-            MV_CC_StopGrabbing(cam_handle_);
-            MV_CC_StartGrabbing(cam_handle_);
+            close_cam();
+            open_cam();
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
             continue;
         }
+
+        if (enable_imu_trigger_) {
+            image_msg.header.stamp = get_corresponding_imu_timestamp(current_time);
+        } else {
+            image_msg.header.stamp = current_time;
+        }
+        camera_info_msg.header = image_msg.header;
 
         // 1440*864, BGR8
         const cv::Mat capture_frame(
@@ -157,9 +184,7 @@ void CameraNode::open_cam() {
         const int camera_nums = devices_list.nDeviceNum;
         for (int i = 0; i < camera_nums; i++) {
             MV_CC_DEVICE_INFO* device_info_ptr = devices_list.pDeviceInfo[i];
-            std::string name(reinterpret_cast<char const*>(
-                device_info_ptr->SpecialInfo.stUsb3VInfo.chUserDefinedName
-            ));
+            std::string name(reinterpret_cast<char const*>(device_info_ptr->SpecialInfo.stUsb3VInfo.chUserDefinedName));
             if (name == camera_name_ || camera_name_ == "auto") {
                 camera_idx = i;
                 break;
@@ -221,6 +246,22 @@ void CameraNode::start_grabbing() {
 
     // 开始取流
     catch_error(MV_CC_StartGrabbing(cam_handle_), "start grabbing");
+}
+
+rclcpp::Time CameraNode::get_corresponding_imu_timestamp(const rclcpp::Time& img_time) const {
+    if (!imu_timestamp_buffer_.empty()) {
+        for (const auto& imu_timestamp: imu_timestamp_buffer_) {
+            const double diff = to_sec(img_time) - to_sec(imu_timestamp);
+            // 相机传输线带宽约3000Mbps，所以大概需要8ms才能把图像传过来
+            // 再考虑到2ms的曝光时间，也就是说这帧图像时间大约在imu时间的10ms之后
+            constexpr double offset = 1e-2;
+            if (offset - 2e-3 < diff && diff < offset + 2e-3) {
+                return imu_timestamp;
+            }
+        }
+    }
+    RCLCPP_WARN(get_logger(), "Failed to get corresponding imu timestamp near image timestamp.");
+    return img_time;
 }
 } // namespace autoaim_camera
 
