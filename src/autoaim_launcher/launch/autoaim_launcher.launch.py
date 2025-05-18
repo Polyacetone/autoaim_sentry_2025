@@ -61,7 +61,7 @@ def launch_func(context, *args, **kwargs):
 def generate_launch_description():
     set_env_log_format = SetEnvironmentVariable(
         name='RCUTILS_CONSOLE_OUTPUT_FORMAT',
-        value='[{severity}] [{name}]: {message}'
+        value='[{time}] [{severity}] [{name}]: {message}'
     )
     container = ComposableNodeContainer(
         name='autoaim_container',

@@ -287,7 +287,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
             return;
         }
 
-        // 注意：发给电控的pitch是向上转为正。但我们在之前的计算中都是向下转为正（因为符合右手定则）。
+        // 注意：发给电控的pitch是向上转为正。但我们在之前的计算中都是向下转为正（因为符合右手定则）
         const float target_pitch = trajectory::calc_pitch(
             target_to_fric.translation.x,
             target_to_fric.translation.y,
@@ -314,8 +314,7 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
         if (enable_send_to_serial_) {
             ShootPos shoot_pos;
             shoot_pos.header.stamp = msg->header.stamp;
-            // 发送给电控的shoot_flag中，0是不发弹，1是单发，2是连发。
-            // 一般打人用连发，打符用单发。
+            // 0是不发弹，1是单发，2是连发
             shoot_pos.shoot_flag = can_shoot ? 2 : 0;
             shoot_pos.pitch = target_pitch;
             shoot_pos.yaw = target_yaw;
@@ -539,7 +538,6 @@ void PredictionNode::send_enemy_position(
     const DetectionArray::SharedPtr msg,
     const std::tuple<float, float, float> &gimbal_ypr
 ) const {
-    if (msg->detections.empty()) return;
     static cv::Point3f car_center_filtered[10] = {};
     bool is_occurred[10] = {};
     std::vector<std::thread> threads;
@@ -554,7 +552,7 @@ void PredictionNode::send_enemy_position(
             geometry_msgs::msg::TransformStamped armor_to_cam;
             armor_to_cam.header.stamp = msg->header.stamp;
             armor_to_cam.header.frame_id = "autoaim_camera";
-            armor_to_cam.child_frame_id = "A" + get_tf_armor_name(detection.color, detection.label, 0);
+            armor_to_cam.child_frame_id = "A_" + get_tf_armor_name(detection.color, detection.label, 0);
             pnp_solver_->solve_pnp(detection, gimbal_ypr, armor_to_cam.transform);
 
             tf_broadcaster_mtx.lock();
@@ -584,14 +582,14 @@ void PredictionNode::send_enemy_position(
             double armor_yaw, armor_pitch, armor_roll;
             rotation_mat.getEulerYPR(armor_yaw, armor_pitch, armor_roll);
             cv::Point3f car_center(
-                armor_center.x + 0.26 * cos(armor_yaw),
-                armor_center.y + 0.26 * sin(armor_yaw),
+                armor_center.x + 0.28 * cos(armor_yaw),
+                armor_center.y + 0.28 * sin(armor_yaw),
                 armor_center.z
             );
 
             if (math::get_distance(car_center - car_center_filtered[detection.label]) < 1.0) {
                 car_center_filtered[detection.label] =
-                    car_center * 0.2 + car_center_filtered[detection.label] * 0.8;
+                    car_center * 0.4 + car_center_filtered[detection.label] * 0.6;
             } else {
                 car_center_filtered[detection.label] = car_center;
             }
@@ -609,9 +607,7 @@ void PredictionNode::send_enemy_position(
     for (auto& t: threads) {
         t.join();
     }
-    if (!enemy_position.enemy_label.empty()) {
-        enemy_position_pub_->publish(enemy_position);
-    }
+    enemy_position_pub_->publish(enemy_position);
 }
 } // namespace autoaim_prediction
 

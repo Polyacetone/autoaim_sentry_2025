@@ -56,7 +56,8 @@ private:
     float SWITCH_ARMOR_ANGLE = math::d2r(50);
     float RADIUS_FILTER_RATIO = 0.7;
     float HEIGHT_FILTER_RATIO = 0.6;
-    float ANTITOP_PALSTANCE_THRESHOLD = math::d2r(50);
+    float ENTER_ANTITOP_PALSTANCE_THRESHOLD = math::d2r(120);
+    float EXIT_ANTITOP_PALSTANCE_THRESHOLD = math::d2r(80);
     float ANTITOP_CAN_SHOOT_ANGLE = math::d2r(30);
     float ANTITOP_FOLLOW_ANGLE = math::d2r(30);
     float OUTPOST_CAN_SHOOT_ANGLE = math::d2r(60);
@@ -72,6 +73,8 @@ private:
 
     double prev_update_time_ = 0;
     float prev_update_angle_ = 0;
+    bool is_antitop_palstance_ = 0;
+    
     int target_label_; // 当前正在跟踪的目标编号，用于特判前哨站
     std::vector<Armor> armors_;
 
@@ -170,7 +173,7 @@ void Tracker::update(const double time_stamp, const int label) {
                 kf_xyz_->force_change_position(armors_[0].center);
             } else if (delta_angle > SWITCH_ARMOR_ANGLE) {
                 // 顺时针转（角速度小于0）时切换装甲板
-                observing_armor_id_ += 3;
+                observing_armor_id_ += (armors_count - 1);
                 observing_armor_id_ %= armors_count;
                 accumulated_yaw_ -= M_PI * 2 / armors_count;
                 kf_xyz_->force_change_position(armors_[0].center);
@@ -198,7 +201,12 @@ std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
     const float bullet_speed, 
     const float img_to_fire_time
 ) {
-    if (abs(kf_yaw_->palstance) < ANTITOP_PALSTANCE_THRESHOLD && !is_outpost()) { // 平动，只用KFXYZ预测
+    if (is_antitop_palstance_ && abs(kf_yaw_->palstance) < EXIT_ANTITOP_PALSTANCE_THRESHOLD) {
+        is_antitop_palstance_ = 0;
+    } else if (!is_antitop_palstance_ && abs(kf_yaw_->palstance) > ENTER_ANTITOP_PALSTANCE_THRESHOLD) {
+        is_antitop_palstance_ = 1;
+    }
+    if (!is_antitop_palstance_ && !is_outpost()) { // 平动，只用KFXYZ预测
         // 理论上来说要精确求出这里的击打时间需要解一个方程，这里为了简化直接采用二阶近似
         const float img_to_hit_time_1 = math::get_distance(kf_xyz_->position) / bullet_speed;
         const float img_to_hit_time_2 = img_to_fire_time +
@@ -225,10 +233,10 @@ std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
         // 选择在img_to_hit_time之后，角度最小（即最面向我们）的那个装甲板
         for (unsigned i = 0; i < armors_count; i++) {
             const float pred_angle_to_gimbal =
-                math::rad_period_correction(pred_yaw_to_gimbal + M_PI * i * 2 / armors_count);
+                math::rad_period_correction(pred_yaw_to_gimbal - 2 * M_PI * i / armors_count);
             if (abs(pred_angle_to_gimbal) < abs(target_angle_to_gimbal)) {
                 target_angle_to_gimbal = pred_angle_to_gimbal;
-                target_armor_id = (observing_armor_id_ + i) % armors_count;
+                target_armor_id = i;
             }
         }
         const float follow_angle = is_outpost() ? OUTPOST_CAN_SHOOT_ANGLE : ANTITOP_FOLLOW_ANGLE;
@@ -290,7 +298,8 @@ void Tracker::load_params(const std::string& params_path) {
     fs["Tracker"]["switch_armor_angle"] >> SWITCH_ARMOR_ANGLE;
     fs["Tracker"]["radius_filter_ratio"] >> RADIUS_FILTER_RATIO;
     fs["Tracker"]["height_filter_ratio"] >> HEIGHT_FILTER_RATIO;
-    fs["Tracker"]["antitop_palstance_threshold"] >> ANTITOP_PALSTANCE_THRESHOLD;
+    fs["Tracker"]["enter_antitop_palstance_threshold"] >> ENTER_ANTITOP_PALSTANCE_THRESHOLD;
+    fs["Tracker"]["exit_antitop_palstance_threshold"] >> EXIT_ANTITOP_PALSTANCE_THRESHOLD;
     fs["Tracker"]["antitop_follow_angle"] >> ANTITOP_FOLLOW_ANGLE;
     fs["Tracker"]["antitop_can_shoot_angle"] >> ANTITOP_CAN_SHOOT_ANGLE;
     MAX_LOST_FRAMES = (int)fs["Tracker"]["max_lost_frames"];
@@ -365,8 +374,10 @@ void Tracker::get_debug_info(hw_sentry_interfaces::msg::DebugInfo& debug_info) {
     debug_info.ukf_xy_velocity = cvpt2_to_tfpt(ukf_->velocity);
     debug_info.kf_yaw = kf_yaw_->yaw;
     debug_info.kf_yaw_palstance = kf_yaw_->palstance;
-    for (int i = 0; i < 2; i++) {
-        debug_info.radius.emplace_back(radius_[i]);
-        debug_info.height.emplace_back(height_[i]);
+    for (const auto item: radius_) {
+        debug_info.radius.emplace_back(item);
+    }
+    for (const auto item: height_) {
+        debug_info.height.emplace_back(item);
     }
 }

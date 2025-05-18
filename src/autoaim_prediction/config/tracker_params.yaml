@@ -14,8 +14,9 @@ Tracker:
   min_radius: 0.2 # 用于更新惯性滤波的半径最小值
   max_radius: 0.4 # 用于更新惯性滤波的半径最大值
   radius_filter_ratio: 0.9 # 较近的装甲板对应半径的惯性滤波系数
-  antitop_palstance_threshold: 1.74533 # 启用反陀螺的角速度阈值。1.74533rad/s = 100deg/s
-  antitop_follow_angle: 0.6 # 小陀螺时，让yaw跟随的角度最大值。若超过则在另一边等待
+  enter_antitop_palstance_threshold: 2.4 # 启用反陀螺的角速度阈值
+  exit_antitop_palstance_threshold: 1.1 # 退出反陀螺的角速度阈值
+  antitop_follow_angle: 0.55 # 小陀螺时，让yaw跟随的角度最大值。若超过则在另一边等待
   antitop_can_shoot_angle: 0.5 # 小陀螺时，shoot_flag置为true的角度最大值
   max_lost_frames: 10 # 最大的丢失帧数。超过就从TEMP_LOST变为LOST
 
@@ -35,8 +36,8 @@ KFXYZ:
     data: [ 1e-0,  0,  0,  0,  0,  0,
             0,  1e-0,  0,  0,  0,  0,
             0,  0,  1e-1,  0,  0,  0,
-            0,  0,  0,  1e+2,  0,  0,
-            0,  0,  0,  0,  1e+2,  0,
+            0,  0,  0,  6e+1,  0,  0,
+            0,  0,  0,  0,  6e+1,  0,
             0,  0,  0,  0,  0,  1e-0 ]
   measurement_noise_cov: !!opencv-matrix
     rows: 3
@@ -51,13 +52,13 @@ KFYaw:
     rows: 2
     cols: 2
     dt: f
-    data: [ 5e-5,  0, 
-            0,  1e-3 ]
+    data: [ 5e-4,  0, 
+            0,  1e-2 ]
   measurement_noise_cov: !!opencv-matrix
     rows: 1
     cols: 1
     dt: f
-    data: [ 1e-2 ]
+    data: [ 1e-3 ]
 
 UKFXY:
   process_noise_cov: !!opencv-matrix

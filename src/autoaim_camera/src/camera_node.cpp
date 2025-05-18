@@ -130,11 +130,9 @@ void CameraNode::capture_thread() {
         const rclcpp::Time current_time = this->now();
 
         if (ret_val != MV_OK) {
-            RCLCPP_ERROR(this->get_logger(), "Get buffer failed! ret_val: [%x]", ret_val);
-            close_cam();
-            open_cam();
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            continue;
+            RCLCPP_FATAL(this->get_logger(), "Get buffer failed! ret_val: [%x]", ret_val);
+            // 把自己杀死后让外面的launcher再拉起来
+            std::exit(1);
         }
 
         if (enable_imu_trigger_) {
@@ -255,12 +253,12 @@ rclcpp::Time CameraNode::get_corresponding_imu_timestamp(const rclcpp::Time& img
             // 相机传输线带宽约3000Mbps，所以大概需要8ms才能把图像传过来
             // 再考虑到2ms的曝光时间，也就是说这帧图像时间大约在imu时间的10ms之后
             constexpr double offset = 1e-2;
-            if (offset - 2e-3 < diff && diff < offset + 2e-3) {
+            if (offset - 3e-3 < diff && diff < offset + 3e-3) {
                 return imu_timestamp;
             }
         }
     }
-    RCLCPP_WARN(get_logger(), "Failed to get corresponding imu timestamp near image timestamp.");
+    RCLCPP_WARN(get_logger(), "Failed to synchronize current image timestamp with imu timestamp");
     return img_time;
 }
 } // namespace autoaim_camera

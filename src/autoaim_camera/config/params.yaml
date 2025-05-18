@@ -5,7 +5,7 @@
     
     camera_name: "autoaim_sentry" # 相机的名称，可以在MVS里面设定
     frame_rate: 100.0 # 帧率仅在连续触发模式生效
-    exposure: 500.0
+    exposure: 2000.0
     gain: 16.0
 
     camera_info_url: "package://autoaim_camera/config/camera_info.yaml" # 相机参数的url

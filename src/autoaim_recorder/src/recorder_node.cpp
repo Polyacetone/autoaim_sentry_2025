@@ -221,7 +221,7 @@ void RecorderNode::draw_info_on_img(const DebugInfo::SharedPtr msg, cv::Mat& img
     char buf[1024];
 
     // 左上角画时间
-    std::sprintf(buf, "T: %.3lf", to_sec(msg->header.stamp) - start_time_);
+    std::sprintf(buf, "T: %.2lf", to_sec(msg->header.stamp) - start_time_);
     text_left_align(img, buf, Point(0, 10), WHITE);
 
     // 右上角画目标装甲板颜色和编号
@@ -231,6 +231,8 @@ void RecorderNode::draw_info_on_img(const DebugInfo::SharedPtr msg, cv::Mat& img
     // 右上角画tracker_status
     const auto status_color = (msg->tracker_status == 0 ? WHITE : (msg->tracker_status == 1 ? GREEN : RED));
     text_middle_align(img, STATUS_MAP[msg->tracker_status], Point(590, 10), status_color);
+    std::sprintf(buf, "%d", msg->current_status_frames);
+    text_middle_align(img, buf, Point(590, 25), status_color);
 
     // 上面中间画可击打状态
     for (int i = 0; i < 6; i++) {
@@ -239,18 +241,7 @@ void RecorderNode::draw_info_on_img(const DebugInfo::SharedPtr msg, cv::Mat& img
     }
 
     // 左下角画跟踪器具体信息
-    if (msg->tracker_status != 3) {
-        if (msg->tracker_status == 0) { // converging
-            std::sprintf(buf, "converging_cnt: %5d", msg->current_status_frames);
-            text_left_align(img, buf, Point(0, 320), WHITE);
-        } else if (msg->tracker_status == 1) { // tracking
-            std::sprintf(buf, "tracking_cnt: %5d", msg->current_status_frames);
-            text_left_align(img, buf, Point(0, 320), GREEN);
-        } else if (msg->tracker_status == 1) { // temp_lost
-            std::sprintf(buf, "temp_lost_cnt: %5d", msg->current_status_frames);
-            text_left_align(img, buf, Point(0, 320), RED);
-        }
-    
+    if (msg->tracker_status != 3) {    
         std::sprintf(
             buf,
             "KF: (%3.0f, %3.0f, %3.0f) += (%3.0f, %3.0f, %3.0f)",
