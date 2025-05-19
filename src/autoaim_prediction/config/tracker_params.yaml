@@ -6,8 +6,8 @@
 Tracker:
 # 以下Tracker参数对车和前哨站都生效
   switch_armor_angle: 0.7 # 角度突变的阈值，用于判断小陀螺跟踪的装甲板是否切换
-  height_filter_ratio: 0.9 # 较近的装甲板对应高度的惯性滤波系数
-  converge_frames: 20 # 收敛帧数。超过则从CONVERGING变为TRACKING
+  height_filter_ratio: 0.8 # 较近的装甲板对应高度的惯性滤波系数
+  converge_frames: 10 # 收敛帧数。超过则从CONVERGING变为TRACKING
 
 # 以下Tracker参数仅对车生效
   initial_radius: 0.26

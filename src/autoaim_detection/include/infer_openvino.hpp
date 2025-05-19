@@ -55,7 +55,7 @@ OpenVINOInferEngine::OpenVINOInferEngine(Config config) {
     ppp.output().tensor().set_element_type(ov::element::f32);
     model = ppp.build();
     compiled_model =
-        core.compile_model(model, "GPU", {
+        core.compile_model(model, "NPU", {
             ov::hint::inference_precision(ov::element::f16), 
             ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY)
         }

@@ -2,7 +2,9 @@
 #include <rclcpp/logging.hpp>
 #include <rclcpp/qos.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2/convert.hpp>
+#include <tf2/utils.hpp>
 #include <tf2/time.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_broadcaster.h>
@@ -202,7 +204,7 @@ void PredictionNode::get_parameters() {
     );
     enemy_position_pub_ = create_publisher<EnemyPosition>(
         enemy_position_pub_topic,
-        rclcpp::QoS(1)
+        rclcpp::SensorDataQoS().keep_last(1)
     );
     debug_info_pub_ = create_publisher<DebugInfo>(
         debug_info_pub_topic,
@@ -538,56 +540,57 @@ void PredictionNode::send_enemy_position(
     const DetectionArray::SharedPtr msg,
     const std::tuple<float, float, float> &gimbal_ypr
 ) const {
-    static cv::Point3f car_center_filtered[10] = {};
+    static tf2::Vector3 car_center_filtered[10] = {};
     bool is_occurred[10] = {};
     std::vector<std::thread> threads;
-    std::mutex enemy_position_mtx, tf_broadcaster_mtx;
+    std::mutex enemy_position_mtx;
     EnemyPosition enemy_position;
     enemy_position.enemy_color = target_color_;
+    tf2::Transform tf_cam_to_map;
+    try {
+        tf2::Transform tf_cam_to_chassis;
+        auto cam_to_chassis = try_get_transform("chassis", "autoaim_camera", msg->header.stamp);
+        tf2::convert<geometry_msgs::msg::Transform, tf2::Transform>(
+            cam_to_chassis,
+            tf_cam_to_chassis
+        );
+        tf2::Transform tf_chassis_to_map;
+        // 这里查最新变换是因为里程计频率比较低，直接查图像时间可能查不到
+        auto chassis_to_map = tf_buffer_->lookupTransform("map", "chassis", tf2::TimePointZero);
+        tf2::convert<geometry_msgs::msg::Transform, tf2::Transform>(
+            chassis_to_map.transform,
+            tf_chassis_to_map
+        );
+        tf_cam_to_map = tf_chassis_to_map * tf_cam_to_chassis;
+    } catch (const std::exception& ex) {
+        RCLCPP_WARN(get_logger(), "can't lookup autoaim_camera to map: %s", ex.what());
+        return;
+    }
     for (const auto& detection: msg->detections) {
         if (detection.color != target_color_) continue;
         if (is_occurred[detection.label]) continue;
         is_occurred[detection.label] = 1;
         threads.emplace_back([&] {
-            geometry_msgs::msg::TransformStamped armor_to_cam;
-            armor_to_cam.header.stamp = msg->header.stamp;
-            armor_to_cam.header.frame_id = "autoaim_camera";
-            armor_to_cam.child_frame_id = "A_" + get_tf_armor_name(detection.color, detection.label, 0);
-            pnp_solver_->solve_pnp(detection, gimbal_ypr, armor_to_cam.transform);
-
-            tf_broadcaster_mtx.lock();
-            tf_broadcaster_->sendTransform(armor_to_cam);
-            tf_broadcaster_mtx.unlock();
-
-            geometry_msgs::msg::Transform armor_to_map;
-            try {
-                armor_to_map = tf_buffer_->lookupTransform(
-                    "map",
-                    armor_to_cam.child_frame_id,
-                    tf2::TimePointZero
-                ).transform;
-            } catch (const std::exception& ex) {
-                RCLCPP_WARN(get_logger(), "Failed to get enemy position to map: %s", ex.what());
-                return;
-            }
-
-            cv::Point3f armor_center(armor_to_map.translation.x, armor_to_map.translation.y, armor_to_map.translation.z);
-            tf2::Quaternion quaternion(
-                armor_to_map.rotation.x,
-                armor_to_map.rotation.y,
-                armor_to_map.rotation.z,
-                armor_to_map.rotation.w
+            geometry_msgs::msg::Transform armor_to_cam;
+            pnp_solver_->solve_pnp(detection, gimbal_ypr, armor_to_cam);
+            tf2::Transform tf_armor_to_cam;
+            tf2::convert<geometry_msgs::msg::Transform, tf2::Transform>(
+                armor_to_cam,
+                tf_armor_to_cam
             );
-            tf2::Matrix3x3 rotation_mat(quaternion);
+
+            tf2::Transform armor_to_map = tf_cam_to_map * tf_armor_to_cam;
+            tf2::Vector3 armor_center = armor_to_map.getOrigin();
             double armor_yaw, armor_pitch, armor_roll;
+            tf2::Matrix3x3 rotation_mat(tf_cam_to_map.getRotation());
             rotation_mat.getEulerYPR(armor_yaw, armor_pitch, armor_roll);
-            cv::Point3f car_center(
-                armor_center.x + 0.28 * cos(armor_yaw),
-                armor_center.y + 0.28 * sin(armor_yaw),
-                armor_center.z
+            tf2::Vector3 car_center(
+                armor_center.x() + 0.28 * cos(armor_yaw),
+                armor_center.y() + 0.28 * sin(armor_yaw),
+                armor_center.z()
             );
 
-            if (math::get_distance(car_center - car_center_filtered[detection.label]) < 1.0) {
+            if (car_center.distance(car_center_filtered[detection.label]) < 0.5) {
                 car_center_filtered[detection.label] =
                     car_center * 0.4 + car_center_filtered[detection.label] * 0.6;
             } else {
@@ -597,9 +600,9 @@ void PredictionNode::send_enemy_position(
             enemy_position_mtx.lock();
             enemy_position.enemy_label.push_back(detection.label);
             geometry_msgs::msg::Point32 point;
-            point.x = car_center_filtered[detection.label].x;
-            point.y = car_center_filtered[detection.label].y;
-            point.z = car_center_filtered[detection.label].z;
+            point.x = car_center_filtered[detection.label].x();
+            point.y = car_center_filtered[detection.label].y();
+            point.z = car_center_filtered[detection.label].z();
             enemy_position.enemy_position.push_back(point);
             enemy_position_mtx.unlock();
         });
