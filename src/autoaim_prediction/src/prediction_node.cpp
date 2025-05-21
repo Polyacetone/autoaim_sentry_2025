@@ -540,23 +540,32 @@ void PredictionNode::send_enemy_position(
     const DetectionArray::SharedPtr msg,
     const std::tuple<float, float, float> &gimbal_ypr
 ) const {
+    const auto current_target_armor = target_armor_;
+    const auto current_tracker_status = tracker_->tracker_status_;
+    const auto current_ukf_center = tracker_->ukf_->position;
+    const auto current_kf_center = tracker_->kf_xyz_->position;
+
     static tf2::Vector3 car_center_filtered[10] = {};
-    bool is_occurred[10] = {};
+    static unsigned appear_frames[10] = {};
+    bool is_label_appears[10] = {};
     std::vector<std::thread> threads;
     std::mutex enemy_position_mtx;
+
     EnemyPosition enemy_position;
+    enemy_position.header.stamp = msg->header.stamp;
     enemy_position.enemy_color = target_color_;
-    tf2::Transform tf_cam_to_map;
+    tf2::Transform tf_cam_to_map, tf_chassis_to_map;
     try {
         tf2::Transform tf_cam_to_chassis;
-        auto cam_to_chassis = try_get_transform("chassis", "autoaim_camera", msg->header.stamp);
+        auto cam_to_chassis =
+            try_get_transform("chassis", "autoaim_camera", msg->header.stamp);
         tf2::convert<geometry_msgs::msg::Transform, tf2::Transform>(
             cam_to_chassis,
             tf_cam_to_chassis
         );
-        tf2::Transform tf_chassis_to_map;
         // 这里查最新变换是因为里程计频率比较低，直接查图像时间可能查不到
-        auto chassis_to_map = tf_buffer_->lookupTransform("map", "chassis", tf2::TimePointZero);
+        auto chassis_to_map =
+            tf_buffer_->lookupTransform("map", "chassis", tf2::TimePointZero);
         tf2::convert<geometry_msgs::msg::Transform, tf2::Transform>(
             chassis_to_map.transform,
             tf_chassis_to_map
@@ -568,9 +577,10 @@ void PredictionNode::send_enemy_position(
     }
     for (const auto& detection: msg->detections) {
         if (detection.color != target_color_) continue;
-        if (is_occurred[detection.label]) continue;
-        is_occurred[detection.label] = 1;
-        threads.emplace_back([&] {
+        if (is_label_appears[detection.label]) continue;
+        is_label_appears[detection.label] = 1;
+        if (appear_frames[detection.label] < 10) continue;
+        threads.emplace_back([=, &enemy_position_mtx, &enemy_position] {
             geometry_msgs::msg::Transform armor_to_cam;
             pnp_solver_->solve_pnp(detection, gimbal_ypr, armor_to_cam);
             tf2::Transform tf_armor_to_cam;
@@ -607,8 +617,35 @@ void PredictionNode::send_enemy_position(
             enemy_position_mtx.unlock();
         });
     }
-    for (auto& t: threads) {
-        t.join();
+    for (auto& t: threads) t.join();
+    for (int i = 0; i < 10; i++) {
+        if (is_label_appears[i]) appear_frames[i]++;
+        else appear_frames[i] = 0;
+    }
+    if (current_target_armor != -1 && current_tracker_status != TRACKER_STATUS::LOST) {
+        tf2::Transform tf_car_center_to_chassis(
+            tf2::Quaternion(0, 0, 0, 1),
+            tf2::Vector3(current_ukf_center.x, current_ukf_center.y, current_kf_center.z)
+        );
+        tf2::Transform tf_car_center_to_map = tf_chassis_to_map * tf_car_center_to_chassis;
+
+        geometry_msgs::msg::Point32 car_center_to_map;
+        car_center_to_map.x = tf_car_center_to_map.getOrigin().x();
+        car_center_to_map.y = tf_car_center_to_map.getOrigin().y();
+        car_center_to_map.z = tf_car_center_to_map.getOrigin().z();
+
+        const auto it = std::find(
+            enemy_position.enemy_label.begin(),
+            enemy_position.enemy_label.end(),
+            current_target_armor
+        );
+        if (it != enemy_position.enemy_label.end()) {
+            const size_t idx = std::distance(enemy_position.enemy_label.begin(), it);
+            enemy_position.enemy_position[idx] = car_center_to_map;
+        } else {
+            enemy_position.enemy_label.emplace_back(current_target_armor);
+            enemy_position.enemy_position.push_back(car_center_to_map);
+        }
     }
     enemy_position_pub_->publish(enemy_position);
 }

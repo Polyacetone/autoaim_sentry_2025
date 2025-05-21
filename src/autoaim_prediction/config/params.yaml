@@ -18,7 +18,7 @@
     detection_sub_topic: "autoaim/detection"
     robot_color_sub_topic: "serial/robot_color" # 根据自己的颜色判断击打目标颜色
     bullet_speed_sub_topic: "serial/bullet_speed"
-    robots_hp_topic: "serial/comp_robots_hp" # 从串口节点接收，获取敌方机器人血量筛掉死人和无敌人
+    robots_hp_topic: "rfr/comp_robots_hp" # 从串口节点接收，获取敌方机器人血量筛掉死人和无敌人
     enemy_priority_sub_topic: "decision/enemy_priority" # 从决策接收，指定打人的优先级
 
     shoot_pos_pub_topic: "autoaim/shoot_pos"

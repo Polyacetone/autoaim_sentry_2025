@@ -63,7 +63,7 @@ RecorderNode::RecorderNode(const rclcpp::NodeOptions& options): Node("autoaim_re
 
     if (record_raw_) {
         video_writer_raw_.open(
-            video_save_directory_ + timestr.str() + " raw.mp4",
+            video_save_directory_ + timestr.str() + " raw.mkv",
             cv::VideoWriter::fourcc('a', 'v', 'c', '1'),
             video_fps_,
             cv::Size(640, 384)
@@ -74,7 +74,7 @@ RecorderNode::RecorderNode(const rclcpp::NodeOptions& options): Node("autoaim_re
     }
     if (record_verbose_) {
         video_writer_verbose_.open(
-            video_save_directory_ + timestr.str() + " verbose.mp4",
+            video_save_directory_ + timestr.str() + " verbose.mkv",
             cv::VideoWriter::fourcc('a', 'v', 'c', '1'),
             video_fps_,
             cv::Size(640, 384)
@@ -147,7 +147,7 @@ void RecorderNode::get_parameters() {
 void RecorderNode::img_raw_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
     const auto cv_ptr = cv_bridge::toCvShare(msg, "bgr8");
     if (cv_ptr->image.empty()) {
-        RCLCPP_WARN(get_logger(), "img_detected_callback() get an empty frame, ignoring");
+        RCLCPP_WARN(get_logger(), "img_raw_callback() get an empty frame, ignoring");
         return;
     }
     cv::Mat image = cv_ptr->image.clone();
