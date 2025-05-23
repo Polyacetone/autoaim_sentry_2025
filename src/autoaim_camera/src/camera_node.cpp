@@ -247,18 +247,28 @@ void CameraNode::start_grabbing() {
 }
 
 rclcpp::Time CameraNode::get_corresponding_imu_timestamp(const rclcpp::Time& img_time) const {
-    if (!imu_timestamp_buffer_.empty()) {
-        for (const auto& imu_timestamp: imu_timestamp_buffer_) {
-            const double diff = to_sec(img_time) - to_sec(imu_timestamp);
-            // 相机传输线带宽约3000Mbps，所以大概需要8ms才能把图像传过来
-            // 再考虑到2ms的曝光时间，也就是说这帧图像时间大约在imu时间的10ms之后
-            constexpr double offset = 1e-2;
-            if (offset - 3e-3 < diff && diff < offset + 3e-3) {
-                return imu_timestamp;
-            }
+    for (const auto& imu_timestamp: imu_timestamp_buffer_) {
+        const double diff = to_sec(img_time) - to_sec(imu_timestamp);
+        // 相机传输线带宽约3000Mbps，所以大概需要8ms才能把图像传过来。相机处理时间大概是2ms的数量级
+        // offset = 曝光时间 + 图像处理时间 + 图像传输时间 - 串口传输时间
+        const double offset = 8e-3 + 2e-3 + exposure_ / 1e6;
+        if (offset - 2e-3 < diff && diff < offset + 2e-3) {
+            return imu_timestamp;
         }
     }
-    RCLCPP_WARN(get_logger(), "Failed to synchronize current image timestamp with imu timestamp");
+    if (imu_timestamp_buffer_.empty()) {
+        RCLCPP_WARN(
+            get_logger(),
+            "Failed to synchronize current image timestamp with imu timestamp, empty imu timestamp buffer"
+        );
+    } else {
+        RCLCPP_WARN(
+            get_logger(), 
+            "Failed to synchronize current image timestamp with imu timestamp, newest timestamp diff: %08.5lf",
+            to_sec(img_time) - to_sec(imu_timestamp_buffer_[0])
+        );
+    }
+    
     return img_time;
 }
 } // namespace autoaim_camera

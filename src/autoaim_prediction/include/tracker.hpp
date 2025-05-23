@@ -6,14 +6,16 @@
 
 #pragma once
 
-#include <kalman_filters.hpp>
-#include <math_utils.hpp>
 #include <tf2/LinearMath/Matrix3x3.hpp>
 #include <tf2/LinearMath/Quaternion.hpp>
 
 #include <geometry_msgs/msg/transform.hpp>
 #include <geometry_msgs/msg/point32.hpp>
 #include <hw_sentry_interfaces/msg/debug_info.hpp>
+
+#include <kalman_filters.hpp>
+#include <math_utils.hpp>
+#include <trajectory.hpp>
 
 enum class TRACKER_STATUS { CONVERGING, TRACKING, TEMP_LOST, LOST };
 
@@ -207,22 +209,34 @@ std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
         is_antitop_palstance_ = 1;
     }
     if (!is_antitop_palstance_ && !is_outpost()) { // 平动，只用KFXYZ预测
-        // 理论上来说要精确求出这里的击打时间需要解一个方程，这里为了简化直接采用二阶近似
-        const float img_to_hit_time_1 = math::get_distance(kf_xyz_->position) / bullet_speed;
-        const float img_to_hit_time_2 = img_to_fire_time +
-            math::get_distance(kf_xyz_->position + img_to_hit_time_1 * kf_xyz_->velocity) / bullet_speed;
+        cv::Point3f target_position = kf_xyz_->position;
+        for (int i = 0; i < 5; i++) {
+            float fly_time;
+            std::tie(std::ignore, fly_time) = trajectory::get_pitch_air_frac(
+                std::hypot(target_position.x, target_position.y),
+                target_position.z,
+                bullet_speed
+            );
+            target_position = kf_xyz_->position + (img_to_fire_time + fly_time) * kf_xyz_->velocity;
+        }
         return std::make_tuple(
-            kf_xyz_->position + img_to_hit_time_2 * kf_xyz_->velocity, 
+            target_position, 
             tracker_status_ != TRACKER_STATUS::CONVERGING
         );
     } else { // 转动，用KFYaw和UKFXY预测
-        // 同上，img_to_hit_time为二阶近似
-        const float img_to_hit_time_1 = math::get_distance(ukf_->position) / bullet_speed;
-        const float img_to_hit_time_2 = img_to_fire_time +
-            math::get_distance(ukf_->position + img_to_hit_time_1 * ukf_->velocity) / bullet_speed;
-        const cv::Point2f pred_center = ukf_->position + ukf_->velocity * img_to_hit_time_2;
+        cv::Point2f pred_center = ukf_->position;
+        float fly_time;
+        for (int i = 0; i < 5; i++) {
+            std::tie(std::ignore, fly_time) = trajectory::get_pitch_air_frac(
+                std::hypot(pred_center.x, pred_center.y),
+                height_[0],
+                bullet_speed
+            );
+            pred_center = ukf_->position + (img_to_fire_time + fly_time) * ukf_->velocity;
+        }
+        const float img_to_hit_time = img_to_fire_time + fly_time;
         // 0号装甲板在世界系下的预测yaw角
-        const float pred_yaw_to_world = kf_yaw_->yaw + kf_yaw_->palstance * img_to_hit_time_2;
+        const float pred_yaw_to_world = kf_yaw_->yaw + kf_yaw_->palstance * img_to_hit_time;
         // 0号装甲板在gimbal系下的预测yaw角
         const float pred_yaw_to_gimbal = math::rad_period_correction(pred_yaw_to_world - gimbal_yaw);
         // 车的装甲板数量，前哨站只有三个装甲板

@@ -181,7 +181,7 @@ void PredictionNode::get_parameters() {
         bullet_speed_sub_topic,
         rclcpp::QoS(1),
         [&](const BulletSpeed::SharedPtr msg) {
-            if (21 <= msg->bullet_speed && msg->bullet_speed <= 25) {
+            if (22.5 <= msg->bullet_speed && msg->bullet_speed <= 24.5) {
                 // 对弹速进行惯性滤波
                 bullet_speed_ = 0.5 * msg->bullet_speed + 0.5 * bullet_speed_;
             }
@@ -290,12 +290,13 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
         }
 
         // 注意：发给电控的pitch是向上转为正。但我们在之前的计算中都是向下转为正（因为符合右手定则）
-        const float target_pitch = trajectory::calc_pitch(
-            target_to_fric.translation.x,
-            target_to_fric.translation.y,
+        float target_pitch;
+        std::tie(target_pitch, std::ignore) = trajectory::get_pitch_air_frac(
+            std::hypot(target_to_fric.translation.x, target_to_fric.translation.y),
             target_to_fric.translation.z,
             bullet_speed_
-        ) - shoot_compensate_pitch_;
+        );
+        target_pitch -= shoot_compensate_pitch_;
         const float target_yaw = math::rad_period_correction(
             atan2(
                 target_to_fric.translation.y,
@@ -495,7 +496,7 @@ void PredictionNode::camera_info_callback(const sensor_msgs::msg::CameraInfo::Sh
 }
 
 void PredictionNode::robots_hp_callback(const CompRobotsHp::SharedPtr msg) {
-    constexpr double INVINCIBLE_TIME = 10;
+    constexpr float INVINCIBLE_TIME = 10;
     int enemy_hp[5];
     if (target_color_ == 1) {
         enemy_hp[0] = msg->red_7_robot_hp; // 电控那边认为7是哨兵
@@ -513,7 +514,7 @@ void PredictionNode::robots_hp_callback(const CompRobotsHp::SharedPtr msg) {
 
     static bool is_enemy_dead[5] = {0, 0, 0, 0, 0};
     static bool is_enemy_invincible[5] = {0, 0, 0, 0, 0};
-    static double invincible_start_time[5] = {0, 0, 0, 0, 0};
+    static float invincible_start_time[5] = {0, 0, 0, 0, 0};
     for (int i = 0; i < 5; i++) {
         if (enemy_hp[i] <= 0) {
             is_enemy_dead[i] = true;

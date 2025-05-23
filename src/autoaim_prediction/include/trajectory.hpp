@@ -36,7 +36,12 @@ std::tuple<float, float> shoot_altitude(float theta, float v, float d) {
     return std::make_tuple(cur_h, fly_time);
 }
 
-// d: 目标到枪口的距离, h: 目标相对于枪口的高度, v: 弹速
+/*!
+    @param d: 目标到枪口的距离
+    @param h: 目标相对于枪口的高度
+    @param v: 弹速
+    @return 射击角度和飞行时间。射击角度向上为正，单位rad
+*/
 std::tuple<float, float> get_pitch_air_frac(float d, float h, float v) {
     constexpr auto get_pitch = [](float d, float h, float v) -> float {
         float pitch = atan(
@@ -63,12 +68,6 @@ std::tuple<float, float> get_pitch_air_frac(float d, float h, float v) {
         fly_time = d / (v * cos(pitch));
     }
     return std::make_tuple(pitch, fly_time);
-}
-
-float calc_pitch(float x, float y, float z, float speed) {
-    float pitch, fly_time;
-    std::tie(pitch, fly_time) = get_pitch_air_frac(sqrt(math::square(x) + math::square(y)), z, speed);
-    return pitch;
 }
 
 } // namespace trajectory
