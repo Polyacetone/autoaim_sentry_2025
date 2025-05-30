@@ -1,4 +1,3 @@
-#include <thread>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/qos.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -65,16 +64,16 @@ private:
     // 选择目标颜色和标签的装甲板，并按照一定规则进行排序
     void select_armors(const std::vector<Detection>& src, std::vector<Detection>& dst) const;
 
-    // 尝试获取指定时间点对应的变换。若尝试MAX_ATTEMPTS后仍没有找到，throw一个std::runtime_error
-    geometry_msgs::msg::Transform try_get_transform(
+    // 尝试获取指定时间点对应的变换。若尝试MAX_ATTEMPTS后仍没有找到，返回的std::string是最后一个尝试返回的错误
+    std::variant<tf2::Transform, std::string> try_lookup_transform(
         const std::string& target,
         const std::string& source,
         const rclcpp::Time& time_point
     ) const;
 
-    // 获取指定时间的自己云台的yaw, pitch, roll（相对于chassis）
-    // 之所以是ypr不是rpy，是因为我们采用的旋转顺序是yaw, pitch, roll
-    std::tuple<float, float, float> get_gimbal_ypr(const rclcpp::Time& time_point) const;
+    std::tuple<float, float, float> lookup_gimbal_ypr(const rclcpp::Time& time_point) const;
+
+    tf2::Transform lookup_chassis_to_map() const;
 
     // 把视野中所有敌人在map系下的中心发送出去，用于决策和导航
     void send_enemy_position(
@@ -173,7 +172,6 @@ void PredictionNode::get_parameters() {
         robot_color_sub_topic,
         rclcpp::QoS(1),
         [&](const RobotColor::SharedPtr msg) {
-            // 需要做一个处理避免裁判系统乱发东西吗？
             target_color_ = 1 - msg->robot_color;
         }
     );
@@ -182,7 +180,6 @@ void PredictionNode::get_parameters() {
         rclcpp::QoS(1),
         [&](const BulletSpeed::SharedPtr msg) {
             if (22.5 <= msg->bullet_speed && msg->bullet_speed <= 24.5) {
-                // 对弹速进行惯性滤波
                 bullet_speed_ = 0.5 * msg->bullet_speed + 0.5 * bullet_speed_;
             }
         }
@@ -213,9 +210,11 @@ void PredictionNode::get_parameters() {
 }
 
 void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
-    std::tuple<float, float, float> gimbal_ypr = get_gimbal_ypr(msg->header.stamp);
+    const std::tuple<float, float, float> gimbal_ypr = lookup_gimbal_ypr(msg->header.stamp);
     float gimbal_yaw, gimbal_pitch, gimbal_roll;
     std::tie(gimbal_yaw, gimbal_pitch, gimbal_roll) = gimbal_ypr;
+
+    const tf2::Transform tf_chassis_to_map = lookup_chassis_to_map();
 
     // 给决策和导航发送敌人中心的位置
     std::thread([=] { send_enemy_position(msg, gimbal_ypr); }).detach();
@@ -231,22 +230,22 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
         armor_to_cam.header.stamp = msg->header.stamp;
         armor_to_cam.header.frame_id = "autoaim_camera";
         armor_to_cam.child_frame_id = armor_name;
-        // 计算装甲板相对于相机坐标系的位姿
         if (!pnp_solver_->solve_pnp(armor, gimbal_ypr, armor_to_cam.transform)) {
             continue;
         }
-
         tf_broadcaster_->sendTransform(armor_to_cam);
-        // 把装甲板的位姿转换到世界坐标系下进行滤波
-        try {
-            auto armor_to_chassis = try_get_transform("chassis", armor_name, msg->header.stamp);
-            tracker_->push(armor_to_chassis);
-        } catch (const std::exception& ex) {
+
+        const auto armor_to_chassis = try_lookup_transform("chassis", armor_name, msg->header.stamp);
+        if (const auto tf_armor_to_chassis = std::get_if<tf2::Transform>(&armor_to_chassis)) {
+            tf2::Transform tf_armor_to_map = tf_chassis_to_map * (*tf_armor_to_chassis);
+            tracker_->push(tf_armor_to_map);
+        } else {
+            const auto err_info = std::get<std::string>(armor_to_chassis);
             RCLCPP_WARN(
                 get_logger(),
-                "Failed to get transform from %s to chassis: %s",
+                "Failed to lookup %s to chassis: %s",
                 armor_name.c_str(),
-                ex.what()
+                err_info.c_str()
             );
         }
     }
@@ -259,50 +258,48 @@ void PredictionNode::detection_callback(const DetectionArray::SharedPtr msg) {
     debug_info_pub_->publish(debug_info);
 
     if (tracker_->tracker_status_ != TRACKER_STATUS::LOST) {
-        cv::Point3f target;
-        bool can_shoot;
-        std::tie(target, can_shoot) = tracker_->get_target_pos(
-            gimbal_yaw,
-            bullet_speed_,
-            to_sec(now()) - to_sec(msg->header.stamp) + control_to_fire_time_
-        );
-
-        geometry_msgs::msg::TransformStamped target_to_chassis;
-        target_to_chassis.header.stamp = msg->header.stamp;
-        target_to_chassis.header.frame_id = "chassis";
-        target_to_chassis.child_frame_id = "target";
-        target_to_chassis.transform.translation.x = target.x;
-        target_to_chassis.transform.translation.y = target.y;
-        target_to_chassis.transform.translation.z = target.z;
-        tf_broadcaster_->sendTransform(target_to_chassis);
-
-        geometry_msgs::msg::Transform target_to_fric;
+        tf2::Transform tf_fake_fric_to_chassis;
         try {
-            // fake_fric是原点在摩擦轮系，但方向和大yaw相同的系。解出来的角度方便控车
-            target_to_fric = try_get_transform("fake_fric", "target", msg->header.stamp);
+            auto fake_fric_to_chassis =
+                tf_buffer_->lookupTransform("chassis", "fake_fric", msg->header.stamp).transform;
+            tf2::convert(fake_fric_to_chassis, tf_fake_fric_to_chassis);
         } catch (const std::exception& ex) {
-            RCLCPP_WARN(
-                get_logger(),
-                "Failed to get transform from target to fake_fric: %s",
-                ex.what()
-            );
+            RCLCPP_ERROR(get_logger(), "Failed to lookup fake_fric to chassis: %s", ex.what());
             return;
         }
 
-        // 注意：发给电控的pitch是向上转为正。但我们在之前的计算中都是向下转为正（因为符合右手定则）
+        const tf2::Transform tf_fake_fric_to_map = tf_chassis_to_map * tf_fake_fric_to_chassis;
+        float img_to_hit_time = tracker_->get_img_to_hit_time(
+            bullet_speed_,
+            to_sec(now()) - to_sec(msg->header.stamp) + control_to_fire_time_,
+            cv::Point3f(
+                tf_fake_fric_to_map.getOrigin().x(),
+                tf_fake_fric_to_map.getOrigin().y(),
+                tf_fake_fric_to_map.getOrigin().z()
+            )
+        );
+
+        cv::Point3f target_to_map;
+        bool can_shoot;
+        std::tie(target_to_map, can_shoot) = tracker_->get_target_pos(gimbal_yaw, img_to_hit_time);
+        tf2::Transform tf_target_to_map;
+        tf_target_to_map.setOrigin({target_to_map.x, target_to_map.y, target_to_map.z});
+
+        tf2::Transform tf_target_to_fake_fric
+            = (tf_chassis_to_map * tf_fake_fric_to_chassis).inverse() * tf_target_to_map;
+        tf2::Vector3 target_to_fake_fric = tf_target_to_fake_fric.getOrigin();
+
+        // 注意：发给电控的pitch是向上转为正。但我们在之前的计算中都是向下转为正
         float target_pitch;
         std::tie(target_pitch, std::ignore) = trajectory::get_pitch_air_frac(
-            std::hypot(target_to_fric.translation.x, target_to_fric.translation.y),
-            target_to_fric.translation.z,
+            std::hypot(target_to_fake_fric.x(), target_to_fake_fric.y()),
+            target_to_fake_fric.z(),
             bullet_speed_
         );
         target_pitch -= shoot_compensate_pitch_;
-        const float target_yaw = math::rad_period_correction(
-            atan2(
-                target_to_fric.translation.y,
-                target_to_fric.translation.x
-            )
-        ) + shoot_compensate_yaw_;
+        const float target_yaw =
+            math::rad_period_correction(atan2(target_to_fake_fric.y(),target_to_fake_fric.x()))
+            + shoot_compensate_yaw_;
 
         if (enable_print_state_) {
             tracker_->debug_print_state();
@@ -435,45 +432,61 @@ void PredictionNode::select_armors(const std::vector<Detection>& src, std::vecto
     center_x_prev = get_center_x(dst[0]);
 }
 
-geometry_msgs::msg::Transform PredictionNode::try_get_transform(
+std::variant<tf2::Transform, std::string> PredictionNode::try_lookup_transform(
     const std::string& target,
     const std::string& source,
     const rclcpp::Time& time_point
 ) const {
     constexpr int MAX_ATTEMPTS = 100;
-    geometry_msgs::msg::Transform transform;
+    std::string err_info;
     for (int i = 0; i < MAX_ATTEMPTS; i++) {
         try {
-            transform = tf_buffer_->lookupTransform(target, source, time_point).transform;
-            return transform;
+            geometry_msgs::msg::Transform transform
+                = tf_buffer_->lookupTransform(target, source, time_point).transform;
+            tf2::Transform tf_transform;
+            tf2::convert(transform, tf_transform);
+            return tf_transform;
         } catch (const std::exception& ex) {
+            err_info = ex.what();
             std::this_thread::sleep_for(std::chrono::microseconds(1));
         }
     }
-    throw std::runtime_error("try_get_transform failed after 100 attempts");
+    return err_info;
 }
 
-std::tuple<float, float, float> PredictionNode::get_gimbal_ypr(const rclcpp::Time& time_point) const {
+std::tuple<float, float, float> PredictionNode::lookup_gimbal_ypr(const rclcpp::Time& time_point) const {
     // 保存之前找过的ypr，在lookupTransform出现异常时返回
     static std::tuple<float, float, float> prev_ypr = std::make_tuple(0, 0, 0);
-    geometry_msgs::msg::Transform transform;
-    try {
-        transform = try_get_transform("chassis", "gimbal_pitch", time_point);
-    } catch (const std::exception& ex) {
-        RCLCPP_WARN(get_logger(), "Failed to get gimbal ypr: %s", ex.what());
+    tf2::Transform tf_gimbal_to_map;
+    
+    const auto gimbal_to_chassis = try_lookup_transform("chassis", "gimbal_pitch", time_point);
+    if (const auto tf_gimbal_to_chassis = std::get_if<tf2::Transform>(&gimbal_to_chassis)) {
+        const auto tf_chassis_to_map = lookup_chassis_to_map();
+        tf_gimbal_to_map = tf_chassis_to_map * (*tf_gimbal_to_chassis);
+    } else {
+        const auto err_info = std::get<std::string>(gimbal_to_chassis);
+        RCLCPP_WARN(get_logger(), "Failed to lookup gimbal ypr: %s", err_info.c_str());
         return prev_ypr;
     }
+
     double yaw, pitch, roll;
-    tf2::Quaternion quat(
-        transform.rotation.x,
-        transform.rotation.y,
-        transform.rotation.z,
-        transform.rotation.w
-    );
-    tf2::Matrix3x3 rot_mat(quat);
+    tf2::Matrix3x3 rot_mat(tf_gimbal_to_map.getRotation());
     rot_mat.getEulerYPR(yaw, pitch, roll);
     prev_ypr = std::make_tuple(yaw, pitch, roll);
     return std::make_tuple(yaw, pitch, roll);
+}
+
+tf2::Transform PredictionNode::lookup_chassis_to_map() const {
+    tf2::Transform tf_chassis_to_map;
+    try {
+        const auto chassis_to_map =
+            tf_buffer_->lookupTransform("map", "chassis", tf2::TimePointZero).transform;
+        tf2::convert(chassis_to_map, tf_chassis_to_map);
+    } catch (const std::exception& ex) {
+        RCLCPP_WARN(get_logger(), "Failed to lookup chassis to map: %s", ex.what());
+        tf_chassis_to_map.setIdentity();
+    }
+    return tf_chassis_to_map;
 }
 
 void PredictionNode::get_debug_info(DebugInfo& msg) {
@@ -533,6 +546,8 @@ void PredictionNode::robots_hp_callback(const CompRobotsHp::SharedPtr msg) {
         }
         if (!is_enemy_dead[i] && !is_enemy_invincible[i]) {
             is_enemy_can_shoot_[i] = true;
+        } else {
+            is_enemy_can_shoot_[i] = false;
         }
     }
 }
@@ -556,26 +571,17 @@ void PredictionNode::send_enemy_position(
     enemy_position.header.stamp = msg->header.stamp;
     enemy_position.enemy_color = target_color_;
     tf2::Transform tf_cam_to_map, tf_chassis_to_map;
-    try {
-        tf2::Transform tf_cam_to_chassis;
-        auto cam_to_chassis =
-            try_get_transform("chassis", "autoaim_camera", msg->header.stamp);
-        tf2::convert<geometry_msgs::msg::Transform, tf2::Transform>(
-            cam_to_chassis,
-            tf_cam_to_chassis
-        );
-        // 这里查最新变换是因为里程计频率比较低，直接查图像时间可能查不到
-        auto chassis_to_map =
-            tf_buffer_->lookupTransform("map", "chassis", tf2::TimePointZero);
-        tf2::convert<geometry_msgs::msg::Transform, tf2::Transform>(
-            chassis_to_map.transform,
-            tf_chassis_to_map
-        );
-        tf_cam_to_map = tf_chassis_to_map * tf_cam_to_chassis;
-    } catch (const std::exception& ex) {
-        RCLCPP_WARN(get_logger(), "can't lookup autoaim_camera to map: %s", ex.what());
+
+    auto cam_to_chassis = try_lookup_transform("chassis", "autoaim_camera", msg->header.stamp);
+    if (const auto tf_cam_to_chassis = std::get_if<tf2::Transform>(&cam_to_chassis)) {
+        tf_chassis_to_map = lookup_chassis_to_map();
+        tf_cam_to_map = tf_chassis_to_map * (*tf_cam_to_chassis);
+    } else {
+        const auto err_info = std::get<std::string>(cam_to_chassis);
+        RCLCPP_WARN(get_logger(), "Failed to lookup autoaim_camera to map: %s", err_info.c_str());
         return;
     }
+
     for (const auto& detection: msg->detections) {
         if (detection.color != target_color_) continue;
         if (is_label_appears[detection.label]) continue;
@@ -585,10 +591,7 @@ void PredictionNode::send_enemy_position(
             geometry_msgs::msg::Transform armor_to_cam;
             pnp_solver_->solve_pnp(detection, gimbal_ypr, armor_to_cam);
             tf2::Transform tf_armor_to_cam;
-            tf2::convert<geometry_msgs::msg::Transform, tf2::Transform>(
-                armor_to_cam,
-                tf_armor_to_cam
-            );
+            tf2::convert(armor_to_cam, tf_armor_to_cam);
 
             tf2::Transform armor_to_map = tf_cam_to_map * tf_armor_to_cam;
             tf2::Vector3 armor_center = armor_to_map.getOrigin();

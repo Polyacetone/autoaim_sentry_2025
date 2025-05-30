@@ -1,5 +1,3 @@
-#include <deque>
-
 #include <MvCameraControl.h>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -45,7 +43,7 @@ private:
     bool enable_fps_;
     bool enable_imu_trigger_;
     std::string camera_name_;
-    float exposure_, gain_, frame_rate_;
+    float exposure_, gain_, gamma_, frame_rate_;
 
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr imu_timestamp_sub_;
     image_transport::CameraPublisher camera_pub_;
@@ -94,6 +92,7 @@ void CameraNode::get_parameters() {
     enable_imu_trigger_ = declare_parameter("enable_imu_trigger", false);
     frame_rate_ = declare_parameter("frame_rate", 100.0);
     exposure_ = declare_parameter("exposure", 2000.0);
+    gamma_ = declare_parameter("gamma", 0.7);
     gain_ = declare_parameter("gain", 16.0);
 
     imu_timestamp_sub_ = create_subscription<sensor_msgs::msg::JointState>(
@@ -215,9 +214,10 @@ void CameraNode::start_grabbing() {
     catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetX", (1440-1280)/2), "set offset x");
     catch_error(MV_CC_SetIntValue(cam_handle_, "OffsetY", (1080-768)), "set offset y");
 
-    // 启用自动gamma
+    // 启用手动gamma
     catch_error(MV_CC_SetBoolValue(cam_handle_, "GammaEnable", true), "set gamma enable");
-    catch_error(MV_CC_SetEnumValue(cam_handle_, "GammaSelector", 2), "set gamma selector");
+    catch_error(MV_CC_SetEnumValue(cam_handle_, "GammaSelector", 1), "set gamma selector");
+    catch_error(MV_CC_SetFloatValue(cam_handle_, "Gamma", gamma_), "set gamma value");
 
     // 启用自动白平衡
     catch_error(MV_CC_SetEnumValue(cam_handle_, "BalanceWhiteAuto", 1), "set balance white auto");
@@ -259,12 +259,12 @@ rclcpp::Time CameraNode::get_corresponding_imu_timestamp(const rclcpp::Time& img
     if (imu_timestamp_buffer_.empty()) {
         RCLCPP_WARN(
             get_logger(),
-            "Failed to synchronize current image timestamp with imu timestamp, empty imu timestamp buffer"
+            "Failed to synchronize current image timestamp with imu timestamp: empty imu timestamp buffer"
         );
     } else {
         RCLCPP_WARN(
             get_logger(), 
-            "Failed to synchronize current image timestamp with imu timestamp, newest timestamp diff: %08.5lf",
+            "Failed to synchronize current image timestamp with imu timestamp: newest timestamp diff: %8.4lf",
             to_sec(img_time) - to_sec(imu_timestamp_buffer_[0])
         );
     }

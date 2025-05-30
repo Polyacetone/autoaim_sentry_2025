@@ -23,7 +23,7 @@ Tracker:
 # 以下Tracker参数仅对前哨站生效
   outpost_radius: 0.275 # 前哨站半径，固定值
   outpost_max_lost_frames: 30 # 前哨站最大的丢失帧数。超过就从TEMP_LOST变为LOST
-  outpost_can_shoot_angle: 0.75 # 前哨站跟随并击打的角度范围
+  outpost_can_shoot_angle: 0.7 # 前哨站跟随并击打的角度范围
 
 KFXYZ:
   enable_adaptive: 1 # 是否启用Sage-Husa自适应更新测量噪声R

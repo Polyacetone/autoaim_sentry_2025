@@ -8,6 +8,8 @@
 
 #include <tf2/LinearMath/Matrix3x3.hpp>
 #include <tf2/LinearMath/Quaternion.hpp>
+#include <tf2/LinearMath/Transform.hpp>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 #include <geometry_msgs/msg/transform.hpp>
 #include <geometry_msgs/msg/point32.hpp>
@@ -27,23 +29,20 @@ struct Armor {
 class Tracker {
 public:
     explicit Tracker(const std::string& params_path);
-    void push(const geometry_msgs::msg::Transform& transform);
+    void push(const tf2::Transform& transform);
     void update(const double time_stamp, const int label);
     void debug_print_state();
     void get_debug_info(hw_sentry_interfaces::msg::DebugInfo& debug_info);
 
-    /*!
-        @brief 获取预测击打坐标（世界系下）
-        @param gimbal_yaw 云台相对世界系的yaw（用于计算面向我们的装甲板是哪个）
-        @param bullet_speed 子弹速度
-        @param img_to_fire_time 图像时间到开火时间的估计值
-        @return 预测的击打坐标，和是否发弹（即shoot_flag）
-        @attention 不应在tracker_status为lost时调用
-    */
+    float get_img_to_hit_time(
+        const float bullet_speed,
+        const float img_to_fire_time,
+        const cv::Point3f fric_to_basis
+    );
+
     std::tuple<cv::Point3f, bool> get_target_pos(
         const float gimbal_yaw,
-        const float bullet_speed, 
-        const float img_to_fire_time
+        const float img_to_hit_time
     );
 
     TRACKER_STATUS tracker_status_ = TRACKER_STATUS::LOST;
@@ -84,6 +83,7 @@ private:
     void update_radius();
     void update_height();
     bool is_outpost() const { return (target_label_ == 5); }
+    bool decide_antitop_mode();
 };
 
 Tracker::Tracker(const std::string& params_path) {
@@ -93,17 +93,12 @@ Tracker::Tracker(const std::string& params_path) {
     ukf_ = std::make_unique<UKFXY>(params_path);
 }
 
-void Tracker::push(const geometry_msgs::msg::Transform& transform) {
+void Tracker::push(const tf2::Transform& transform) {
     Armor armor;
-    armor.center =
-        cv::Point3f(transform.translation.x, transform.translation.y, transform.translation.z);
-    tf2::Quaternion quaternion(
-        transform.rotation.x,
-        transform.rotation.y,
-        transform.rotation.z,
-        transform.rotation.w
-    );
-    tf2::Matrix3x3 rotation_mat(quaternion);
+    armor.center.x = transform.getOrigin().x();
+    armor.center.y = transform.getOrigin().y();
+    armor.center.z = transform.getOrigin().z();
+    tf2::Matrix3x3 rotation_mat(transform.getRotation());
     double yaw, pitch, roll;
     rotation_mat.getEulerYPR(yaw, pitch, roll);
     armor.angle = yaw;
@@ -198,43 +193,52 @@ void Tracker::update(const double time_stamp, const int label) {
     prev_update_time_ = time_stamp;
 }
 
-std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
-    const float gimbal_yaw,
-    const float bullet_speed, 
-    const float img_to_fire_time
-) {
+bool Tracker::decide_antitop_mode() {
     if (is_antitop_palstance_ && abs(kf_yaw_->palstance) < EXIT_ANTITOP_PALSTANCE_THRESHOLD) {
         is_antitop_palstance_ = 0;
     } else if (!is_antitop_palstance_ && abs(kf_yaw_->palstance) > ENTER_ANTITOP_PALSTANCE_THRESHOLD) {
         is_antitop_palstance_ = 1;
     }
-    if (!is_antitop_palstance_ && !is_outpost()) { // 平动，只用KFXYZ预测
-        cv::Point3f target_position = kf_xyz_->position;
-        for (int i = 0; i < 5; i++) {
-            float fly_time;
-            std::tie(std::ignore, fly_time) = trajectory::get_pitch_air_frac(
-                std::hypot(target_position.x, target_position.y),
-                target_position.z,
-                bullet_speed
-            );
-            target_position = kf_xyz_->position + (img_to_fire_time + fly_time) * kf_xyz_->velocity;
-        }
+    return is_antitop_palstance_ || is_outpost();
+}
+
+float Tracker::get_img_to_hit_time(
+    const float bullet_speed,
+    const float img_to_fire_time,
+    const cv::Point3f fric_to_basis
+) {
+    bool is_antitop_mode = decide_antitop_mode();
+    const cv::Point3f target_to_basis = is_antitop_mode
+        ? cv::Point3f(ukf_->position.x, ukf_->position.y, height_[0])
+        : kf_xyz_->position;
+    const cv::Point3f target_speed = is_antitop_mode
+        ? cv::Point3f(ukf_->velocity.x, ukf_->velocity.y, 0)
+        : kf_xyz_->velocity;
+    float fly_time = 0;
+    for (int i = 0; i < 5; i++) {
+        const cv::Point3f pred_target_to_basis = target_to_basis + target_speed * (img_to_fire_time + fly_time);
+        const cv::Point3f pred_target_to_fric = pred_target_to_basis - fric_to_basis;
+        std::tie(std::ignore, fly_time) = trajectory::get_pitch_air_frac(
+            std::hypot(pred_target_to_fric.x, pred_target_to_fric.y),
+            pred_target_to_fric.z,
+            bullet_speed
+        );
+    }
+    return img_to_fire_time + fly_time;
+}
+
+std::tuple<cv::Point3f, bool> Tracker::get_target_pos(
+    const float gimbal_yaw,
+    const float img_to_hit_time
+) {
+    const bool is_antitop_mode = decide_antitop_mode();
+    if (!is_antitop_mode) {
         return std::make_tuple(
-            target_position, 
+            kf_xyz_->position + kf_xyz_->velocity * img_to_hit_time, 
             tracker_status_ != TRACKER_STATUS::CONVERGING
         );
-    } else { // 转动，用KFYaw和UKFXY预测
-        cv::Point2f pred_center = ukf_->position;
-        float fly_time;
-        for (int i = 0; i < 5; i++) {
-            std::tie(std::ignore, fly_time) = trajectory::get_pitch_air_frac(
-                std::hypot(pred_center.x, pred_center.y),
-                height_[0],
-                bullet_speed
-            );
-            pred_center = ukf_->position + (img_to_fire_time + fly_time) * ukf_->velocity;
-        }
-        const float img_to_hit_time = img_to_fire_time + fly_time;
+    } else {
+        const cv::Point2f pred_center = ukf_->position + ukf_->velocity * img_to_hit_time;
         // 0号装甲板在世界系下的预测yaw角
         const float pred_yaw_to_world = kf_yaw_->yaw + kf_yaw_->palstance * img_to_hit_time;
         // 0号装甲板在gimbal系下的预测yaw角
