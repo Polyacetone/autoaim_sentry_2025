@@ -1,0 +1,18 @@
+/**:
+  ros__parameters:
+    enable_fps: false
+    enable_labeled_image: true
+    default_mode: 0 # 没收到决策消息时的默认模式，用于调试。-1:null, 0:armor, 1:buff, 2:dart
+
+    model_path: "20250519v11.xml"
+    device_name: "GPU"
+    confidence_threshold: 0.4
+    nms_threshold: 0.4
+
+    ### Subscribe topics
+    input_image_topic: "autoaim/camera/image_raw"
+    target_enemy_topic: "decision/target_enemy"
+
+    ### Publish topics
+    detections_topic: "autoaim/detector/detections"
+    labeled_image_topic: "autoaim/detector/labeled_image"

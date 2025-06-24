@@ -1,0 +1,8 @@
+/**:
+  ros__parameters:
+    ### Subscribe topics
+    camera_info_topic: "autoaim/camera/camera_info"
+    selected_detections_topic: "autoaim/selector/detections"
+
+    ### Publish topics
+    poses_topic: "autoaim/locator/poses"

@@ -5,43 +5,22 @@ from launch.event_handlers import (OnExecutionComplete, OnProcessExit, OnProcess
 from launch.actions import RegisterEventHandler, LogInfo, OpaqueFunction, SetEnvironmentVariable
 from ament_index_python.packages import get_package_share_directory
 
-namespace = 'hw_sentry'
+namespace = ''
+node_names = ['camera', 'detector', 'selector', 'locator', 'predictor']
 
 def launch_func(context, *args, **kwargs):
-    camera_params_yaml = os.path.join(get_package_share_directory('autoaim_camera'), 'config', 'params.yaml')
-    detection_params_yaml = os.path.join(get_package_share_directory('autoaim_detection'), 'config', 'params.yaml')
-    prediction_params_yaml = os.path.join(get_package_share_directory('autoaim_prediction'), 'config', 'params.yaml')
-    recorder_params_yaml = os.path.join(get_package_share_directory('autoaim_recorder'), 'config', 'params.yaml')
-    composable_node_descriptions = [
-        ComposableNode(
-            package='autoaim_camera',
-            plugin='autoaim_camera::CameraNode',
-            name='autoaim_camera',
-            parameters=[camera_params_yaml],
-            extra_arguments=[{'use_intra_process_comms': True}]
-        ),
-        ComposableNode(
-            package='autoaim_detection',
-            plugin='autoaim_detection::YoloDetectNode',
-            name='autoaim_detection',
-            parameters=[detection_params_yaml],
-            extra_arguments=[{'use_intra_process_comms': True}]
-        ),
-        ComposableNode(
-            package='autoaim_prediction',
-            plugin='autoaim_prediction::PredictionNode',
-            name='autoaim_prediction',
-            parameters=[prediction_params_yaml],
-            extra_arguments=[{'use_intra_process_comms': True}]
-        ),
-        ComposableNode(
-            package='autoaim_recorder',
-            plugin='autoaim_recorder::RecorderNode',
-            name='autoaim_recorder',
-            parameters=[recorder_params_yaml],
-            extra_arguments=[{'use_intra_process_comms': True}]
+    composable_node_descriptions = []
+    for node_name in node_names:
+        node_params_yaml = os.path.join(get_package_share_directory(f'autoaim_{node_name}'), 'config', 'params.yaml')
+        composable_node_descriptions.append(
+            ComposableNode(
+                package=f'autoaim_{node_name}',
+                plugin=f'autoaim_{node_name}::{node_name.capitalize()}Node',
+                name=f'autoaim_{node_name}',
+                parameters=[node_params_yaml],
+                extra_arguments=[{'use_intra_process_comms': True}]
+            )
         )
-    ]
     time.sleep(1)
     return [
         LoadComposableNodes(

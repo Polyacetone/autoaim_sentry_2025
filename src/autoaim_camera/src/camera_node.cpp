@@ -1,17 +1,14 @@
 #include <MvCameraControl.h>
-#include <rclcpp/logging.hpp>
 #include <rclcpp/rclcpp.hpp>
-#include <rclcpp/utilities.hpp>
+#include <opencv2/opencv.hpp>
 #include <camera_info_manager/camera_info_manager.hpp>
 #include <image_transport/image_transport.hpp>
+
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 
-#include <opencv2/opencv.hpp>
-
 namespace autoaim_camera {
-
 double to_sec(builtin_interfaces::msg::Time t) {
     return t.sec + t.nanosec * 1e-9;
 }
@@ -83,17 +80,16 @@ bool CameraNode::catch_error(int ret, const char* description) {
 }
 
 void CameraNode::get_parameters() {
-    std::string camera_info_url =
-        declare_parameter("camera_info_url", "package://autoaim_camera/config/camera_info.yaml");
-    std::string img_pub_topic = declare_parameter("img_pub_topic", "/camera/color/image_raw");
-    std::string imu_timestamp_topic = declare_parameter("imu_timestamp_topic", "serial/gimbal_joint_state");
-    camera_name_ = declare_parameter("camera_name", "auto");
-    enable_fps_ = declare_parameter("enable_fps", false);
-    enable_imu_trigger_ = declare_parameter("enable_imu_trigger", false);
-    frame_rate_ = declare_parameter("frame_rate", 100.0);
-    exposure_ = declare_parameter("exposure", 2000.0);
-    gamma_ = declare_parameter("gamma", 0.7);
-    gain_ = declare_parameter("gain", 16.0);
+    std::string camera_info_url = declare_parameter<std::string>("camera_info_url");
+    std::string image_raw_topic = declare_parameter<std::string>("image_raw_topic");
+    std::string imu_timestamp_topic = declare_parameter<std::string>("imu_timestamp_topic");
+    camera_name_ = declare_parameter<std::string>("camera_name");
+    enable_fps_ = declare_parameter<bool>("enable_fps");
+    enable_imu_trigger_ = declare_parameter<bool>("enable_imu_trigger");
+    frame_rate_ = declare_parameter<float>("frame_rate");
+    exposure_ = declare_parameter<float>("exposure");
+    gamma_ = declare_parameter<float>("gamma");
+    gain_ = declare_parameter<float>("gain");
 
     imu_timestamp_sub_ = create_subscription<sensor_msgs::msg::JointState>(
         imu_timestamp_topic,
@@ -110,11 +106,12 @@ void CameraNode::get_parameters() {
     if (camera_info_manager_->validateURL(camera_info_url)) {
         camera_info_manager_->loadCameraInfo(camera_info_url);
     } else {
-        RCLCPP_ERROR(this->get_logger(), "Invalid camera info URL: %s", camera_info_url.c_str());
+        RCLCPP_FATAL(get_logger(), "Failed to load camera info");
+        throw std::runtime_error("invalid camera_info_url");
     }
-    rmw_qos_profile_t custom_qos = rmw_qos_profile_sensor_data;
+    rmw_qos_profile_t custom_qos = rmw_qos_profile_default;
     custom_qos.depth = 1;
-    camera_pub_ = image_transport::create_camera_publisher(this, img_pub_topic, custom_qos);
+    camera_pub_ = image_transport::create_camera_publisher(this, image_raw_topic, custom_qos);
 }
 
 void CameraNode::capture_thread() {

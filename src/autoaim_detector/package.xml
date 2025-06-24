@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>autoaim_camera</name>
+  <name>autoaim_detector</name>
   <version>0.0.0</version>
-  <description>Camera node</description>
+  <description>Detection node</description>
   <maintainer email="mitsuha.2213@gmail.com">Polyacetone</maintainer>
   <license>MIT</license>
 
@@ -11,18 +11,22 @@
 
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
-  <depend>image_transport</depend>
-  <depend>image_transport_plugins</depend>
-  <depend>camera_info_manager</depend>
   <depend>OpenCV</depend>
+  <depend>OpenMP</depend>
+  <depend>OpenVINO</depend>
+  <depend>ament_index_cpp</depend>
+  <depend>cv_bridge</depend>
+  <depend>image_transport</depend>
 
+  <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <depend>builtin_interfaces</depend>
   <depend>hw_sentry_interfaces</depend>
-
-  <exec_depend>camera_calibration</exec_depend>
-
+  
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_clang_format</test_depend>
   <export>
     <build_type>ament_cmake</build_type>
   </export>
