@@ -4,7 +4,7 @@ project(autoaim_locator)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-add_compile_options(-Ofast -Wall -Wextra)
+add_compile_options(-O3 -Wall -Wextra)
 
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()

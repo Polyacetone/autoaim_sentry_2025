@@ -116,7 +116,7 @@ Poses LocatorNode::solve_armor_detections(const Detections::SharedPtr msg) {
         {},
         chassis_to_basis,
         [&](const std::string& err) {
-            RCLCPP_WARN(get_logger(), "Failed to lookup gimbal to chassis: %s", err.c_str());
+            RCLCPP_WARN(get_logger(), "Failed to lookup chassis to map: %s", err.c_str());
         }
     )) poses.header.frame_id = "map";
     else poses.header.frame_id = "chassis";
@@ -127,15 +127,10 @@ Poses LocatorNode::solve_armor_detections(const Detections::SharedPtr msg) {
     
     for (const auto& detection: msg->armor_detections) {
         auto armor_to_cam = pnp_solver_->solve_pnp(detection, gimbal_ypr);
-        if (std::holds_alternative<std::monostate>(armor_to_cam)) {
-            RCLCPP_ERROR(get_logger(), "Failed to solve pnp: invalid result");
-            continue;
-        }
-        auto armor_to_basis = chassis_to_basis * cam_to_chassis * std::get<tf2::Transform>(armor_to_cam);
+        auto armor_to_basis = chassis_to_basis * cam_to_chassis * armor_to_cam;
         auto armor_pose = utils::convert_to<geometry_msgs::msg::Pose>(armor_to_basis);
         poses.poses.emplace_back(armor_pose);
     }
-
     return poses;
 }
 
