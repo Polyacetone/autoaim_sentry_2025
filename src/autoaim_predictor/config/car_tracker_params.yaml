@@ -3,75 +3,68 @@
 
 # 均采用国际单位制，距离为m，时间为s，角度为弧度
 
-CarTracker:
-# 以下CarTracker参数对车和前哨站都生效
-  switch_armor_angle: 0.7 # 角度突变的阈值，用于判断小陀螺跟踪的装甲板是否切换
-  height_filter_ratio: 0.9 # 较近的装甲板对应高度的惯性滤波系数
-  converge_frames: 10 # 收敛帧数。超过则从CONVERGING变为TRACKING
-
-# 以下CarTracker参数仅对车生效
+Car:
   initial_radius: 0.26
-  min_radius: 0.2 # 用于更新惯性滤波的半径最小值
-  max_radius: 0.4 # 用于更新惯性滤波的半径最大值
-  radius_filter_ratio: 0.9 # 较近的装甲板对应半径的惯性滤波系数
-  enter_antitop_palstance_threshold: 3.0 # 启用反陀螺的角速度阈值
-  exit_antitop_palstance_threshold: 1.8 # 退出反陀螺的角速度阈值
-  antitop_follow_angle: 0.55 # 小陀螺时，让yaw跟随的角度最大值。若超过则在另一边等待
-  antitop_can_shoot_angle: 0.5 # 小陀螺时，shoot_flag置为true的角度最大值
-  max_lost_frames: 10 # 最大的丢失帧数。超过就从TEMP_LOST变为LOST
+  switch_armor_angle: 0.7
+  radius_filter_ratio: 0.7
+  height_filter_ratio: 0.7
+  axis_filter_ratio: 0.7
+  kf_center:
+    process_noise: !!opencv-matrix
+      rows: 6
+      cols: 6
+      dt: f
+      data: [ 1e-0,  0,  0,  0,  0,  0,
+              0,  1e-0,  0,  0,  0,  0,
+              0,  0,  1e-0,  0,  0,  0,
+              0,  0,  0,  1e-0,  0,  0,
+              0,  0,  0,  0,  1e-0,  0,
+              0,  0,  0,  0,  0,  1e-0 ]
+    measurement_noise: !!opencv-matrix
+      rows: 3
+      cols: 3
+      dt: f
+      data: [ 3e-3,  0,  0,
+              0,  3e-3,  0,
+              0,  0,  1e-1 ]
+  
+  kf_yaw:
+    process_noise: !!opencv-matrix
+      rows: 2
+      cols: 2
+      dt: f
+      data: [ 5e-4,  0, 
+              0,  1e-2 ]
+    measurement_noise: !!opencv-matrix
+      rows: 1
+      cols: 1
+      dt: f
+      data: [ 1e-3 ]
 
-# 以下CarTracker参数仅对前哨站生效
-  outpost_radius: 0.275 # 前哨站半径，固定值
-  outpost_max_lost_frames: 30 # 前哨站最大的丢失帧数。超过就从TEMP_LOST变为LOST
-  outpost_can_shoot_angle: 0.7 # 前哨站跟随并击打的角度范围
+Status:
+  max_temp_lost_frames: 10
+  max_converging_frames: 10
 
-KFXYZ:
-  enable_adaptive: 1 # 是否启用Sage-Husa自适应更新测量噪声R
-  adaptive_forget_factor: 0.2 # 测量噪声R的惯性滤波参数
-  adaptive_start_frame: 50 # 开始更新测量噪声的帧数
-  process_noise_cov: !!opencv-matrix
-    rows: 6
-    cols: 6
-    dt: f
-    data: [ 1e-0,  0,  0,  0,  0,  0,
-            0,  1e-0,  0,  0,  0,  0,
-            0,  0,  1e-1,  0,  0,  0,
-            0,  0,  0,  1e+2,  0,  0,
-            0,  0,  0,  0,  1e+2,  0,
-            0,  0,  0,  0,  0,  1e-0 ]
-  measurement_noise_cov: !!opencv-matrix
-    rows: 3
-    cols: 3
-    dt: f
-    data: [ 3e-5,  0,  0,
-            0,  3e-5,  0,
-            0,  0,  1e-2 ]
-
-KFYaw:
-  process_noise_cov: !!opencv-matrix
-    rows: 2
-    cols: 2
-    dt: f
-    data: [ 5e-4,  0, 
-            0,  1e-2 ]
-  measurement_noise_cov: !!opencv-matrix
-    rows: 1
-    cols: 1
-    dt: f
-    data: [ 1e-3 ]
-
-UKFXY:
-  process_noise_cov: !!opencv-matrix
-    rows: 4
-    cols: 4
-    dt: f
-    data: [ 1e-0,  0,  0,  0,
-            0,  1e-0,  0,  0,
-            0,  0,  5e+0,  0,
-            0,  0,  0,  5e+0 ]
-  measurement_noise_cov: !!opencv-matrix
-    rows: 2
-    cols: 2
-    dt: f
-    data: [ 8e-3,  0,
-            0,  8e-3 ]
+CarTracker:
+  enter_antispin_palstance: 3.0
+  exit_antispin_palstance: 1.8
+  antispin_follow_angle: 0.55
+  antispin_shoot_angle: 0.5
+  kf_main_observing_armor:
+    process_noise: !!opencv-matrix
+      rows: 6
+      cols: 6
+      dt: f
+      data: [ 1e-0,  0,  0,  0,  0,  0,
+              0,  1e-0,  0,  0,  0,  0,
+              0,  0,  1e-1,  0,  0,  0,
+              0,  0,  0,  1e+2,  0,  0,
+              0,  0,  0,  0,  1e+2,  0,
+              0,  0,  0,  0,  0,  1e-0 ]
+    measurement_noise: !!opencv-matrix
+      rows: 3
+      cols: 3
+      dt: f
+      data: [ 3e-5,  0,  0,
+              0,  3e-5,  0,
+              0,  0,  1e-2 ]

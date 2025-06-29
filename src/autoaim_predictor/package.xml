@@ -19,9 +19,10 @@
 
   <depend>tf2_geometry_msgs</depend>
   <depend>geometry_msgs</depend>
+  <depend>visualization_msgs</depend>
   <depend>hw_sentry_interfaces</depend>
 
-  <depend>autoaim_common_utils</depend>
+  <depend>autoaim_common_libs</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

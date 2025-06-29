@@ -7,7 +7,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_compile_options(-O3 -Wall -Wextra)
 
 find_package(ament_cmake_auto REQUIRED)
-ament_auto_find_build_dependencies(REQUIRED autoaim_common_utils)
+ament_auto_find_build_dependencies()
 
 file(GLOB sources "src/*.cpp")
 ament_auto_add_library(${PROJECT_NAME} SHARED ${sources})

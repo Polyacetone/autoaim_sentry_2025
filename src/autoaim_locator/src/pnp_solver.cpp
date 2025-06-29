@@ -4,7 +4,8 @@ tf2::Transform PnPSolver::solve_pnp(
     const hw_sentry_interfaces::msg::ArmorDetection& detection,
     const std::tuple<float, float, float>& gimbal_ypr
 ) const {
-    const auto& obj_pts = is_big_armor(detection.label) ? BIG_POINTS : SMALL_POINTS;
+    const ArmorType label = static_cast<ArmorType>(detection.label);
+    const auto& obj_pts = defs::is_big_armor(label) ? BIG_POINTS : SMALL_POINTS;
     const std::vector<cv::Point2f> img_pts {
         {detection.tl.x, detection.tl.y},
         {detection.bl.x, detection.bl.y},
@@ -32,7 +33,7 @@ tf2::Transform PnPSolver::solve_pnp(
     // 左乘即可把我们在tf2的相机系转掉云台的pitch和roll
     const Eigen::Quaternionf gimbal_pr(roll_rotation * pitch_rotation);
 
-    std::array<float, 2> corrected_pitch;
+    float corrected_pitch[2];
     Eigen::Quaternionf rotation[2];
     Eigen::Vector3f translation[2];
     for (int i = 0; i < 2; i++) {
@@ -49,7 +50,7 @@ tf2::Transform PnPSolver::solve_pnp(
     }
 
     int index;
-    if (is_pitch_negative(detection.label)) {
+    if (defs::is_armor_pitch_negative(label)) {
         index = corrected_pitch[0] < corrected_pitch[1] ? 0 : 1;
     } else {
         index = corrected_pitch[0] > corrected_pitch[1] ? 0 : 1;
@@ -96,12 +97,4 @@ float PnPSolver::get_reprojection_err(
         cost += std::sqrt(cost_i);
     }
     return static_cast<float>(cost);
-}
-
-bool PnPSolver::is_big_armor(int label) const {
-    return (label == 1 || label == 7);
-}
-
-bool PnPSolver::is_pitch_negative(int label) const {
-    return (label == 5);
 }

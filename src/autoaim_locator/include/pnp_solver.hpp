@@ -14,6 +14,7 @@
 #include <autoaim_common_utils/tf_utils.hpp>
 #include <autoaim_common_utils/math_utils.hpp>
 #include <autoaim_common_utils/convert_utils.hpp>
+#include <autoaim_common_definitions/common_definitions.hpp>
 
 class PnPSolver {
 public:
@@ -23,9 +24,6 @@ public:
     */
     void set_cam_matrix(const cv::Mat intrinsic, const cv::Mat distortion);
 
-    /*!
-        @brief 解PNP
-    */
     tf2::Transform solve_pnp(
         const hw_sentry_interfaces::msg::ArmorDetection& detection,
         const std::tuple<float, float, float>& gimbal_ypr
@@ -38,9 +36,6 @@ private:
         const std::vector<cv::Point2f>& reprojected_pts,
         const float prior_yaw
     ) const;
-
-    bool is_big_armor(int label) const;
-    bool is_pitch_negative(int label) const;
 
     static constexpr float DETECTOR_ERROR_PIXEL_BY_SLOPE = 2.0f;
 

@@ -5,7 +5,7 @@
     default_mode: 0 # 没收到决策消息时的默认模式，用于调试。-1:null, 0:armor, 1:buff, 2:dart
 
     model_path: "20250519v11.xml"
-    device_name: "GPU"
+    device_name: "CPU"
     confidence_threshold: 0.4
     nms_threshold: 0.4
 

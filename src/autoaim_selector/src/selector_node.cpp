@@ -6,25 +6,22 @@
 #include <hw_sentry_interfaces/msg/comp_robots_hp.hpp>
 #include <hw_sentry_interfaces/msg/target_enemy.hpp>
 
+#include <autoaim_common_definitions/common_definitions.hpp>
+
 namespace autoaim_selector {
 using namespace hw_sentry_interfaces::msg;
 
 class SelectorNode: public rclcpp::Node {
 public:
     explicit SelectorNode(const rclcpp::NodeOptions& options);
-    ~SelectorNode() = default;
 
 private:
     void detections_callback(const Detections::SharedPtr msg);
     void select_armors(const std::vector<ArmorDetection>& src, std::vector<ArmorDetection>& dst) const;
 
-    bool is_big_armor(int label) const {
-        return (label == 1);
-    }
-
-    int mode_ = -1;
-    int target_color_ = -1;
-    int target_label_ = -1;
+    AutoaimMode mode_ = AutoaimMode::NONE;
+    ArmorColor target_color_ = ArmorColor::NONE;
+    ArmorType target_label_ = ArmorType::NONE;
 
     rclcpp::Subscription<Detections>::SharedPtr detections_sub_;
     rclcpp::Subscription<RobotColor>::SharedPtr robot_color_sub_;
@@ -34,9 +31,9 @@ private:
 };
 
 SelectorNode::SelectorNode(const rclcpp::NodeOptions& options): Node("autoaim_selector", options) {
-    mode_ = declare_parameter<int>("default_mode");
-    target_label_ = declare_parameter<int>("default_target_label");
-    target_color_ = declare_parameter<int>("default_target_color");
+    mode_ = static_cast<AutoaimMode>(declare_parameter<int>("default_mode"));
+    target_label_ = static_cast<ArmorType>(declare_parameter<int>("default_target_label"));
+    target_color_ = static_cast<ArmorColor>(declare_parameter<int>("default_target_color"));
 
     std::string detections_sub_topic = declare_parameter<std::string>("detections_topic");
     std::string target_enemy_sub_topic = declare_parameter<std::string>("target_enemy_topic");
@@ -51,14 +48,17 @@ SelectorNode::SelectorNode(const rclcpp::NodeOptions& options): Node("autoaim_se
     robot_color_sub_ = create_subscription<RobotColor>(
         robot_color_sub_topic,
         rclcpp::QoS(1),
-        [&](const RobotColor::SharedPtr msg) { target_color_ = 1 - msg->robot_color; }
+        [&](const RobotColor::SharedPtr msg) {
+            const ArmorColor robot_color = static_cast<ArmorColor>(msg->robot_color);
+            target_color_ = (robot_color == ArmorColor::BLUE) ? ArmorColor::RED : ArmorColor::BLUE;
+        }
     );
     target_enemy_sub_ = create_subscription<TargetEnemy>(
         target_enemy_sub_topic,
         rclcpp::QoS(1),
         [&](const TargetEnemy::SharedPtr msg) {
-            mode_ = msg->mode;
-            target_label_ = msg->label;
+            mode_ = static_cast<AutoaimMode>(msg->mode);
+            target_label_ = static_cast<ArmorType>(msg->label);
         }
     );
 
@@ -69,12 +69,12 @@ SelectorNode::SelectorNode(const rclcpp::NodeOptions& options): Node("autoaim_se
 }
 
 void SelectorNode::detections_callback(const Detections::SharedPtr msg) {
-    if (msg->mode != mode_) return;
+    if (static_cast<AutoaimMode>(msg->mode) != mode_) return;
     Detections selected_detections;
     selected_detections.header.stamp = msg->header.stamp;
-    selected_detections.mode = mode_;
-    selected_detections.label = target_label_;
-    if (msg->mode == 0) {
+    selected_detections.mode = static_cast<int>(mode_);
+    selected_detections.label = static_cast<int>(target_label_);
+    if (mode_ == AutoaimMode::ARMOR) {
         select_armors(msg->armor_detections, selected_detections.armor_detections);
         selected_detections_pub_->publish(selected_detections);
     }
@@ -90,19 +90,14 @@ void SelectorNode::select_armors(
     constexpr auto get_area = [](const ArmorDetection& d) -> int {
         return (d.br.x - d.tl.x) * (d.br.y - d.tl.y);
     };
-    constexpr auto get_length_height_ratio = [](const ArmorDetection& d) -> float {
-        return fabs((d.tl.x + d.bl.x - d.tr.x - d.br.x) / (d.tl.y + d.tr.y - d.bl.y - d.br.y));
-    };
     static int center_x_prev = 0;
     std::vector<ArmorDetection> filtered;
     // 筛选出目标颜色和标签的装甲板
     for (const auto& armor: src) {
-        // 用装甲板长宽比筛掉太斜的装甲板
-        const bool yaw_too_large = get_length_height_ratio(armor) < (is_big_armor(armor.label) ? 2.0 : 1.6);
-        if (!yaw_too_large && armor.label == target_label_) {
-            if (target_color_ == armor.color) {
+        if (static_cast<ArmorType>(armor.label) == target_label_) {
+            if (static_cast<ArmorColor>(armor.color) == target_color_) {
                 filtered.emplace_back(armor);
-            } else if (armor.color == 2) { // 特殊处理灰色装甲板
+            } else if (static_cast<ArmorColor>(armor.color) == ArmorColor::GRAY) { // 特殊处理灰色装甲板
                 if (abs(get_center_x(armor) - center_x_prev) <= 15) {
                     // 这里只根据灰色装甲板位置与上次瞄的位置差判断是否是被打成灰的
                     filtered.emplace_back(armor);

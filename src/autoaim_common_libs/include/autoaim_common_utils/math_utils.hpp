@@ -26,7 +26,7 @@ static constexpr double rad_period_correction(const double rad) {
 }
 
 // 计算两个Eigen向量的夹角。返回值介于0~pi
-static constexpr double get_angle(const Eigen::Vector2d& vec1, const Eigen::Vector2d& vec2) {
+static constexpr double get_angle(const Eigen::VectorXd& vec1, const Eigen::VectorXd& vec2) {
     double cosval = vec1.dot(vec2) / (vec1.norm() * vec2.norm());
     if (vec1.norm() * vec2.norm() < 0.001 || cosval > 0.999) [[unlikely]] {
         return 0.0;

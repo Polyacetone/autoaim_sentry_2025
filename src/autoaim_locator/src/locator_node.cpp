@@ -23,7 +23,6 @@ using namespace geometry_msgs::msg;
 class LocatorNode: public rclcpp::Node {
 public:
     explicit LocatorNode(const rclcpp::NodeOptions& options);
-    ~LocatorNode() = default;
 
 private:
     void camera_info_callback(const CameraInfo::SharedPtr msg);
@@ -66,12 +65,13 @@ LocatorNode::LocatorNode(const rclcpp::NodeOptions& options): Node("autoaim_loca
 }
 
 void LocatorNode::detections_callback(const Detections::SharedPtr msg) {
+    const AutoaimMode mode = static_cast<AutoaimMode>(msg->mode);
     Poses poses;
-    if (msg->mode == 0) {
+    if (mode == AutoaimMode::ARMOR) {
         poses = solve_armor_detections(msg);
-    } else if (msg->mode == 1) {
+    } else if (mode == AutoaimMode::BUFF) {
         // solve buff detections
-    } else if (msg->mode == 2) {
+    } else if (mode == AutoaimMode::DART) {
         // solve dart detections
     }
     poses_pub_->publish(poses);
@@ -79,7 +79,7 @@ void LocatorNode::detections_callback(const Detections::SharedPtr msg) {
 
 Poses LocatorNode::solve_armor_detections(const Detections::SharedPtr msg) {
     Poses poses;
-    poses.mode = 0;
+    poses.mode = msg->mode;
     poses.label = msg->label;
     poses.header.stamp = msg->header.stamp;
 

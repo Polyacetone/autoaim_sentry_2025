@@ -1,82 +1,103 @@
 #pragma once
 
+#include <Eigen/Dense>
 #include <opencv2/opencv.hpp>
-
-#include <tf2/LinearMath/Matrix3x3.hpp>
-#include <tf2/LinearMath/Quaternion.hpp>
-#include <tf2/LinearMath/Transform.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-#include <geometry_msgs/msg/transform.hpp>
-#include <geometry_msgs/msg/point32.hpp>
 
 #include <autoaim_common_utils/tf_utils.hpp>
 #include <autoaim_common_utils/convert_utils.hpp>
 #include <autoaim_common_utils/math_utils.hpp>
-#include <kalman_filters.hpp>
+#include <termcolor/termcolor.hpp>
+#include <kalman_filter.hpp>
+#include <low_pass_filter.hpp>
 #include <trajectory.hpp>
 
-enum class TrackerStatus { CONVERGING, TRACKING, TEMP_LOST, LOST };
+enum class TrackerStatus: unsigned { CONVERGING, TRACKING, TEMP_LOST, LOST };
 
 struct Armor {
-    cv::Point3f center; // 装甲板中心坐标
-    float angle; // 装甲板向心方向在xy平面的投影向量与正前方（y轴）的夹角，逆时针为正
+    explicit Armor(const tf2::Transform& armor_pose);
+    explicit Armor(const Eigen::Vector3f& translation, const Eigen::Quaternionf& rotation);
+
+    Eigen::Vector3f translation; // 直接从tf中拿来的位移
+    Eigen::Quaternionf rotation; // 直接从tf中拿来的旋转
+    Eigen::Vector3f rotated_x, rotated_y, rotated_z; // 绕着原y轴转15度后的各个方向向量
+    float yaw; // 法向量在xy平面上投影与x轴的夹角
+};
+
+struct Car {
+    explicit Car(const cv::FileNode& fn);
+
+    float INITIAL_RADIUS, SWITCH_ARMOR_ANGLE;
+    // 目前主要观测的装甲板编号。一般来说主要观测的是可视面积最大的那块，对应pushed_armors_[0]
+    // 定义第一块看到的装甲板为0，车逆时针转（角速度>0）时看到的依次编号1、2、3
+    unsigned main_observing_armor_id = 0;
+    float accumulated_yaw; // 累计的0号装甲板yaw角，作为观测量更新kf_rotation_angle
+    float prev_main_observing_yaw; // 上一帧作为主要观测装甲板的yaw角，用于逐差更新accumulated_yaw
+    std::unique_ptr<LPF<1>> radius[4]; // 每个装甲板对应的半径
+    std::unique_ptr<LPF<1>> height[4]; // 每个装甲板相对于0号装甲板的高度
+    std::unique_ptr<LPF<3>> axis; // 车的旋转轴
+    std::unique_ptr<KF<3>> kf_center; // 车中心的位置。车中心在转轴上的高度由0号装甲板确定，即认为0号装甲板对应的中心就是车的中心
+    std::unique_ptr<KF<1>> kf_yaw; // 0号装甲板累计绕旋转轴转的角度
+};
+
+class Status { 
+public:
+    explicit Status(
+        const cv::FileNode& fn,
+        std::function<void(TrackerStatus from, TrackerStatus to)> status_change_handler,
+        std::function<void(TrackerStatus current)> status_remain_handler
+    );
+
+    void reset();
+    void update(bool is_valid);
+    TrackerStatus status() const;
+    unsigned status_frames() const;
+
+private:
+    void set_next_status(TrackerStatus status);
+
+    // 两个handler会且仅会被调用其中一个
+    const std::function<void(TrackerStatus from, TrackerStatus to)> status_change_handler; // 状态转移时调用
+    const std::function<void(TrackerStatus current)> status_remain_handler; // 状态持续时调用
+    unsigned MAX_TEMP_LOST_FRAMES, MAX_CONVERGING_FRAMES;
+
+    TrackerStatus status_ = TrackerStatus::LOST;
+    unsigned current_status_frames_ = 0;
 };
 
 class CarTracker {
 public:
     explicit CarTracker(const std::string& params_path);
-    void push(const tf2::Transform& transform);
-    void update(const double time_stamp, const int label);
-    void debug_print_state();
 
-    float get_img_to_hit_time(
+    void push(const tf2::Transform& armor_pose);
+    void update(const double timestamp);
+    void reset();
+    TrackerStatus status() const;
+    float predict_img_to_hit_time(
         const float bullet_speed,
         const float img_to_fire_time,
-        const cv::Point3f fric_to_basis
-    );
-
-    std::tuple<cv::Point3f, bool> get_target_pos(
-        const float gimbal_yaw,
+        const Eigen::Vector3f fric_to_basis
+    ) const;
+    std::tuple<Eigen::Vector3f, bool> predict_shoot_pos(
+        const float gimbal_yaw_to_basis,
         const float img_to_hit_time
-    );
+    ) const;
 
-    TrackerStatus tracker_status_ = TrackerStatus::LOST;
-    std::unique_ptr<KFXYZ> kf_xyz_;
-    std::unique_ptr<KFYaw> kf_yaw_;
-    std::unique_ptr<UKFXY> ukf_;
+    void print_colored_status_info() const;
+    std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>> get_all_armors() const;
 
 private:
-    float INITIAL_RADIUS = 0.26;
-    float MIN_RADIUS = 0.2, MAX_RADIUS = 0.35;
-    float OUTPOST_RADIUS = 0.22;
-    float SWITCH_ARMOR_ANGLE = utils::d2r(50);
-    float RADIUS_FILTER_RATIO = 0.7;
-    float HEIGHT_FILTER_RATIO = 0.6;
-    float ENTER_ANTITOP_PALSTANCE_THRESHOLD = utils::d2r(120);
-    float EXIT_ANTITOP_PALSTANCE_THRESHOLD = utils::d2r(80);
-    float ANTITOP_CAN_SHOOT_ANGLE = utils::d2r(30);
-    float ANTITOP_FOLLOW_ANGLE = utils::d2r(30);
-    float OUTPOST_CAN_SHOOT_ANGLE = utils::d2r(60);
-    unsigned MAX_LOST_FRAMES = 5;
-    unsigned CONVERGE_FRAMES = 5;
-    unsigned OUTPOST_MAX_LOST_FRAMES = 40;
-
-    unsigned current_status_frames_ = 0; // 当前tracker_status状态的持续帧数
-    unsigned observing_armor_id_ = 0; // 正在观测的装甲板编号。定义第一块看到的装甲板为0，车逆时针转时看到的依次编号1、2、3
-    float radius_[2]; // radius_[0]对应0、2装甲板半径，radius_[1]对应1、3
-    float height_[4]; // 分别对应4个不同的装甲板高度
-    float accumulated_yaw_ = 0; // 根据帧间差累计的yaw角，用于更新kf_yaw_
-
-    double prev_update_time_ = 0;
-    float prev_update_angle_ = 0;
-    bool is_antitop_palstance_ = 0;
+    void status_change_handler(TrackerStatus from, TrackerStatus to);
+    void status_remain_handler(TrackerStatus current);
+    void update_antispin_mode();
     
-    int target_label_; // 当前正在跟踪的目标编号，用于特判前哨站
-    std::vector<Armor> armors_;
-
-    void load_params(const std::string& params_path);
-    void update_radius();
-    void update_height();
-    bool is_outpost() const { return (target_label_ == 5); }
-    bool decide_antitop_mode();
+    const unsigned ARMORS_COUNT = 4; // 一辆车有4个装甲板
+    float ENTER_ANTISPIN_PALSTANCE, EXIT_ANTISPIN_PALSTANCE;
+    float ANTISPIN_FOLLOW_ANGLE, ANTISPIN_SHOOT_ANGLE;
+    std::vector<Armor> pushed_armors_;
+    std::unique_ptr<Status> status_; // 状态机
+    std::unique_ptr<Car> car_; // 整车观测器
+    std::unique_ptr<KF<3>> kf_main_observing_armor_; // 当转速较小时不需要整车观测，只跟踪装甲板收敛速度更快
+    double prev_update_time_, current_update_time_;
+    bool is_antispin_mode_ = false;
 };

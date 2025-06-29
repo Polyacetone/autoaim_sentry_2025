@@ -118,7 +118,7 @@ void CameraNode::capture_thread() {
     sensor_msgs::msg::Image image_msg;
     sensor_msgs::msg::CameraInfo camera_info_msg;
     MV_FRAME_OUT out_frame;
-    image_msg.header.frame_id = "camera_optical_frame";
+    image_msg.header.frame_id = "autoaim_camera";
     image_msg.encoding = "bgr8";
     camera_info_msg = camera_info_manager_->getCameraInfo();
     while (rclcpp::ok()) {
