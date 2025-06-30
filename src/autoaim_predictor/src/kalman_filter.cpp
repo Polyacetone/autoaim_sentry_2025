@@ -22,6 +22,11 @@ KF<MEASUREMENT_DIM>::KF(const cv::FileNode& fn) :
 }
 
 template <unsigned MEASUREMENT_DIM>
+void KF<MEASUREMENT_DIM>::reset() {
+    initialize(Eigen::Vector<float, MEASUREMENT_DIM>::Zero());
+}
+
+template <unsigned MEASUREMENT_DIM>
 void KF<MEASUREMENT_DIM>::initialize(const Eigen::Vector<float, MEASUREMENT_DIM>& meas) {
     x_.setZero();
     x_.template head<MEASUREMENT_DIM>() = meas;

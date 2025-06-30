@@ -21,7 +21,7 @@ std::tuple<float, float> shoot_altitude(float theta, float v, float d) {
         vh += -air_fraction_acc(cur_v) * vh / cur_v * dt - G * dt;
         fly_time += dt;
     }
-    return std::make_tuple(cur_h, fly_time);
+    return {cur_h, fly_time};
 }
 
 std::tuple<float, float> get_pitch_air_frac(float d, float h, float v) {
@@ -49,7 +49,7 @@ std::tuple<float, float> get_pitch_air_frac(float d, float h, float v) {
         pitch = get_pitch(d, h, v);
         fly_time = d / (v * cos(pitch));
     }
-    return std::make_tuple(pitch, fly_time);
+    return {pitch, fly_time};
 }
 
 } // namespace trajectory

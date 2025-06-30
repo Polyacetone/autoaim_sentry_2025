@@ -40,12 +40,11 @@ static constexpr bool try_lookup_tf(
     return false;
 }
 
-
 static constexpr std::tuple<float, float, float> to_euler_ypr(const tf2::Quaternion& quat) {
     double yaw, pitch, roll;
     tf2::Matrix3x3 rot_mat(quat);
     rot_mat.getEulerYPR(yaw, pitch, roll);
-    return std::make_tuple(yaw, pitch, roll);
+    return {yaw, pitch, roll};
 }
 
 } // namespace utils

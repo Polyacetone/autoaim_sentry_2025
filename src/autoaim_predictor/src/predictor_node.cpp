@@ -15,7 +15,7 @@
 #include <autoaim_common_utils/tf_utils.hpp>
 #include <autoaim_common_utils/math_utils.hpp>
 #include <autoaim_common_definitions/common_definitions.hpp>
-#include <car_tracker.hpp>
+#include <armor_tracker.hpp>
 
 namespace autoaim_predictor {
 using namespace hw_sentry_interfaces::msg;
@@ -43,7 +43,7 @@ private:
     float control_to_fire_time_;
     float shoot_compensate_pitch_, shoot_compensate_yaw_;
 
-    std::unique_ptr<CarTracker> car_tracker_;
+    std::unique_ptr<ArmorTracker> armor_tracker_;
     std::string current_basis_frame_id;
 
     std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -58,10 +58,10 @@ PredictorNode::PredictorNode(const rclcpp::NodeOptions& options): Node("autoaim_
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
     tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
 
-    std::string car_tracker_params_path =
+    std::string armor_tracker_params_path =
         ament_index_cpp::get_package_share_directory("autoaim_predictor")
-        + "/config/car_tracker_params.yaml";
-    car_tracker_ = std::make_unique<CarTracker>(car_tracker_params_path);
+        + "/config/armor_tracker_params.yaml";
+    armor_tracker_ = std::make_unique<ArmorTracker>(armor_tracker_params_path);
 
     enable_print_state_ = declare_parameter<bool>("enable_print_state");
     enable_visualization_marker_ = declare_parameter<bool>("enable_visualization_marker");
@@ -109,22 +109,21 @@ void PredictorNode::poses_callback(const Poses::SharedPtr msg) {
             );
         }
         current_basis_frame_id = msg->header.frame_id;
-        car_tracker_->reset();
+        armor_tracker_->reset();
     }
 
     if (mode == AutoaimMode::ARMOR) {
+        armor_tracker_->set_target_label(static_cast<ArmorType>(msg->label));
         for (const auto& armor_pose: msg->poses) {
-            car_tracker_->push(utils::convert_to<tf2::Transform>(armor_pose));
+            armor_tracker_->push(utils::convert_to<tf2::Transform>(armor_pose));
         }
-        car_tracker_->update(rclcpp::Time(msg->header.stamp).seconds());
-        if (car_tracker_->status() == TrackerStatus::LOST) return;
+        armor_tracker_->update(rclcpp::Time(msg->header.stamp).seconds());
+        if (armor_tracker_->status() == StatusType::LOST) return;
         if (enable_print_state_) {
-            car_tracker_->print_colored_status_info();
+            armor_tracker_->print_colored_status_info();
             std::cout << "(Basis frame id: " << current_basis_frame_id << ")" << std::endl;
         }
-        Eigen::Vector3f target;
-        bool can_shoot;
-        std::tie(target, can_shoot) = predict_target(msg->header.stamp);
+        auto [target, can_shoot]= predict_target(msg->header.stamp);
         if (target != Eigen::Vector3f(0, 0, 0)) {
             send_shoot_pos(msg->header.stamp, target, can_shoot);
         }
@@ -132,7 +131,7 @@ void PredictorNode::poses_callback(const Poses::SharedPtr msg) {
             visualization_msgs::msg::MarkerArray marker_arr;
             marker_arr.markers = construct_armor_markers(
                 msg->header.stamp,
-                car_tracker_->get_all_armors(),
+                armor_tracker_->get_all_armors(),
                 static_cast<ArmorType>(msg->label
             ));
             marker_arr.markers.emplace_back(construct_target_point_marker(
@@ -156,12 +155,12 @@ std::tuple<Eigen::Vector3f, bool> PredictorNode::predict_target(const rclcpp::Ti
             [&](const std::string& err) {
                 RCLCPP_WARN(get_logger(), "Failed to lookup chassis to map: %s", err.c_str());
             }
-        )) return std::make_tuple(Eigen::Vector3f(0, 0, 0), 0);
+        )) return {{Eigen::Vector3f(0, 0, 0)}, false};
     } else if (current_basis_frame_id == "chassis") {
         chassis_to_basis.setIdentity();
     } else {
         RCLCPP_ERROR(get_logger(), "Invalid basis frame id: %s", current_basis_frame_id.c_str());
-        return std::make_tuple(Eigen::Vector3f(0, 0, 0), 0);
+        return {{Eigen::Vector3f(0, 0, 0)}, false};
     }
 
     tf2::Transform gimbal_to_chassis;
@@ -174,7 +173,7 @@ std::tuple<Eigen::Vector3f, bool> PredictorNode::predict_target(const rclcpp::Ti
         [&](const std::string& err) {
             RCLCPP_WARN(get_logger(), "Failed to lookup gimbal to chassis: %s", err.c_str());
         }
-    )) return std::make_tuple(Eigen::Vector3f(0, 0, 0), 0);
+    )) return {{Eigen::Vector3f(0, 0, 0)}, false};
     auto gimbal_to_basis = chassis_to_basis * gimbal_to_chassis;
     auto gimbal_ypr = utils::to_euler_ypr(gimbal_to_basis.getRotation());
 
@@ -188,30 +187,25 @@ std::tuple<Eigen::Vector3f, bool> PredictorNode::predict_target(const rclcpp::Ti
         [&](const std::string& err) {
             RCLCPP_WARN(get_logger(), "Failed to lookup fake_fric to chassis: %s", err.c_str());
         }
-    )) return std::make_tuple(Eigen::Vector3f(0, 0, 0), 0);
+    )) return {{Eigen::Vector3f(0, 0, 0)}, false};
     auto fake_fric_to_bassis = chassis_to_basis * fake_fric_to_chassis;
 
-    float img_to_now_time = now().seconds() - img_time.seconds();
-    float img_to_hit_time = car_tracker_->predict_img_to_hit_time(
+    auto [target_to_basis_translation, can_shoot] = armor_tracker_->predict_shoot_pos(
         bullet_speed_,
-        img_to_now_time + control_to_fire_time_,
-        utils::convert_to<Eigen::Vector3f>(fake_fric_to_bassis.getOrigin())
+        now().seconds() - img_time.seconds() + control_to_fire_time_,
+        utils::convert_to<Eigen::Vector3f>(fake_fric_to_bassis.getOrigin()),
+        std::get<0>(gimbal_ypr)
     );
-
-    Eigen::Vector3f target_to_basis_translation;
-    bool can_shoot;
-    std::tie(target_to_basis_translation, can_shoot) =
-        car_tracker_->predict_shoot_pos(std::get<0>(gimbal_ypr), img_to_hit_time);
     tf2::Transform target_to_basis(
         {0, 0, 0, 1},
         utils::convert_to<tf2::Vector3>(target_to_basis_translation)
     );
     
     auto target_to_fake_fric = fake_fric_to_bassis.inverse() * target_to_basis;
-    return std::make_tuple(
+    return {
         utils::convert_to<Eigen::Vector3f>(target_to_fake_fric.getOrigin()),
         can_shoot
-    );
+    };
 }
 
 void PredictorNode::send_shoot_pos(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, bool can_shoot) const {

@@ -4,6 +4,11 @@ template<unsigned D>
 LPF<D>::LPF(const float filter_ratio): filter_ratio_(filter_ratio) {}
 
 template<unsigned D>
+void LPF<D>::reset() {
+    initialize(Eigen::Vector<float, D>::Zero());
+}
+
+template<unsigned D>
 void LPF<D>::initialize(const Eigen::Vector<float, D>& val) {
     value_ = val;
 }

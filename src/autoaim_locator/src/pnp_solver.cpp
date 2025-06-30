@@ -26,8 +26,7 @@ tf2::Transform PnPSolver::solve_pnp(
     // 左乘即可把opencv的相机系（右x，下y，前z）转成我们在tf2中的相机系（前x，左y，上z）
     const Eigen::Quaternionf cv_to_tf(-0.5, 0.5, -0.5, 0.5);
 
-    float gimbal_pitch, gimbal_roll;
-    std::tie(std::ignore, gimbal_pitch, gimbal_roll) = gimbal_ypr;
+    auto [gimbal_yaw, gimbal_pitch, gimbal_roll] = gimbal_ypr;
     const Eigen::AngleAxisf roll_rotation(gimbal_roll, Eigen::Vector3f::UnitX());
     const Eigen::AngleAxisf pitch_rotation(gimbal_pitch, Eigen::Vector3f::UnitY());
     // 左乘即可把我们在tf2的相机系转掉云台的pitch和roll

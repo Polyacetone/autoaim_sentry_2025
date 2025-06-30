@@ -11,6 +11,7 @@ public:
     static constexpr unsigned STATE_DIM = 2 * MEASUREMENT_DIM;  // 状态维度：位置+速度
 
     explicit KF(const cv::FileNode& fn);
+    void reset();
     void initialize(const Eigen::Vector<float, MEASUREMENT_DIM>& meas);
     void predict(float delta_t);
     void update(const Eigen::Vector<float, MEASUREMENT_DIM>& meas);
