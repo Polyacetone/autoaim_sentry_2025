@@ -30,13 +30,6 @@ public:
     ) const;
 
 private:
-    // 计算实际的角点和重投影后的角点的差异
-    float get_reprojection_err(
-        const std::vector<cv::Point2f>& ref_pts,
-        const std::vector<cv::Point2f>& reprojected_pts,
-        const float prior_yaw
-    ) const;
-
     static constexpr float DETECTOR_ERROR_PIXEL_BY_SLOPE = 2.0f;
 
     // 单位: 米

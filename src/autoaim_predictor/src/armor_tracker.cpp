@@ -75,7 +75,7 @@ std::tuple<Vector3f, Quaternionf> calc_armor_pose(
         - axis.dot(armor_normal_on_xy) * axis
     ).normalized();
     const Vector3f armor_center = armor_pointing_center - armor_normal * radius;
-    Eigen::Matrix3f rmat;
+    Matrix3f rmat;
     rmat.col(0) = armor_normal;
     rmat.col(1) = axis.cross(armor_normal).normalized();
     rmat.col(2) = axis.normalized();
@@ -99,8 +99,8 @@ unsigned calc_another_armor_id(
 float calc_img_to_hit_time(
     const float bullet_speed,
     const float img_to_fire_time,
-    const Eigen::Vector3f& target_to_fake_fric,
-    const Eigen::Vector3f& target_speed
+    const Vector3f& target_to_fake_fric,
+    const Vector3f& target_speed
 ) {
     float fly_time = 0;
     for (int i = 0; i < 5; i++) {
@@ -124,7 +124,7 @@ Armor::Armor(const tf2::Transform& armor_pose): Armor(
     utils::convert_to<Quaternionf>(armor_pose.getRotation())
 ) {}
 
-Armor::Armor(const Eigen::Vector3f& translation, const Eigen::Quaternionf& rotation):
+Armor::Armor(const Vector3f& translation, const Quaternionf& rotation):
     translation(translation) {
     Vector3f original_x = rotation * Vector3f::UnitX();
     Vector3f original_y = rotation * Vector3f::UnitY();
@@ -326,7 +326,7 @@ void CarObserver::update(const std::vector<Armor>& armors) {
 float CarObserver::predict_img_to_hit_time(
     const float bullet_speed,
     const float img_to_fire_time,
-    const Eigen::Vector3f fric_to_basis
+    const Vector3f fric_to_basis
 ) const {
     return calc_img_to_hit_time(
         bullet_speed,
@@ -336,7 +336,7 @@ float CarObserver::predict_img_to_hit_time(
     );
 }
 
-std::tuple<Eigen::Vector3f, bool> CarObserver::predict_shoot_pos(
+std::tuple<Vector3f, bool> CarObserver::predict_shoot_pos(
     const float gimbal_yaw_to_basis,
     const float img_to_hit_time
 ) const {
@@ -426,13 +426,13 @@ void CarObserver::print_colored_status_info() const {
     std::cout << std::endl;
 }
 
-std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>> CarObserver::get_all_armors() const {
-    std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>> armors;
+std::vector<std::tuple<Vector3f, Quaternionf>> CarObserver::get_all_armors() const {
+    std::vector<std::tuple<Vector3f, Quaternionf>> armors;
     for (unsigned i = 0; i < ARMORS_COUNT; i++) {
         const float armor_yaw =  utils::rad_period_correction(
             kf_yaw_->value().value() - 2 * M_PI * i / ARMORS_COUNT
         );
-        const std::tuple<Eigen::Vector3f, Eigen::Quaternionf> armor_pose = calc_armor_pose(
+        const std::tuple<Vector3f, Quaternionf> armor_pose = calc_armor_pose(
             kf_center_->value(),
             axis_->value(),
             height_[i]->value().value(),
@@ -503,7 +503,7 @@ void OutpostObserver::update(const std::vector<Armor>& armors) {
 float OutpostObserver::predict_img_to_hit_time(
     const float bullet_speed,
     const float img_to_fire_time,
-    const Eigen::Vector3f fric_to_basis
+    const Vector3f fric_to_basis
 ) const {
     return calc_img_to_hit_time(
         bullet_speed,
@@ -513,7 +513,7 @@ float OutpostObserver::predict_img_to_hit_time(
     );
 }
 
-std::tuple<Eigen::Vector3f, bool> OutpostObserver::predict_shoot_pos(
+std::tuple<Vector3f, bool> OutpostObserver::predict_shoot_pos(
     const float gimbal_yaw_to_basis,
     const float img_to_hit_time
 ) const {
@@ -581,13 +581,13 @@ void OutpostObserver::print_colored_status_info() const {
     std::cout << std::endl;
 }
 
-std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>> OutpostObserver::get_all_armors() const {
-    std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>> armors;
+std::vector<std::tuple<Vector3f, Quaternionf>> OutpostObserver::get_all_armors() const {
+    std::vector<std::tuple<Vector3f, Quaternionf>> armors;
     for (unsigned i = 0; i < ARMORS_COUNT; i++) {
         const float armor_yaw =  utils::rad_period_correction(
             kf_yaw_->value().value() - 2 * M_PI * i / ARMORS_COUNT
         );
-        const std::tuple<Eigen::Vector3f, Eigen::Quaternionf> armor_pose = calc_armor_pose(
+        const std::tuple<Vector3f, Quaternionf> armor_pose = calc_armor_pose(
             kf_center_->value(),
             Vector3f::UnitZ(),
             0,
@@ -605,11 +605,9 @@ std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>> OutpostObserver::ge
 
 ArmorTracker::ArmorTracker(const std::string& params_path) {
     cv::FileStorage fs(params_path, cv::FileStorage::READ);
-    float accuracy_filter_ratio = static_cast<float>(fs["ArmorTracker"]["accuracy_filter_ratio"]);
-    kf_armor_pred_accuracy_ = std::make_unique<EMAF<1>>(accuracy_filter_ratio);
-    car_pred_accuracy_ = std::make_unique<EMAF<1>>(accuracy_filter_ratio);
-    ACCURATE_ERR_THRESHOLD = static_cast<float>(fs["ArmorTracker"]["accurate_err_threshold"]);
-    CAR_ACCURACY_THRESHOLD = static_cast<float>(fs["ArmorTracker"]["car_accuracy_threshold"]);
+    AVG_ERR_THRESHOLD = static_cast<float>(fs["ArmorTracker"]["avg_err_threshold"]);
+    ERR_QUEUE_SIZE = static_cast<int>(fs["ArmorTracker"]["err_queue_size"]);
+    APPROXIMATE_FRAMERATE = static_cast<int>(fs["ArmorTracker"]["approximate_framerate"]);
     kf_main_observing_armor_ = std::make_unique<KF<3>>(fs["ArmorTracker"]["kf_main_observing_armor"]);
     car_status_ = std::make_unique<TrackerStatus>(
         fs["CarStatus"],
@@ -646,8 +644,9 @@ void ArmorTracker::reset() {
     outpost_status_->reset();
     kf_armor_pred_pos_history_.clear();
     car_pred_pos_history_.clear();
-    kf_armor_pred_accuracy_->reset();
-    car_pred_accuracy_->reset();
+    kf_armor_err_que_.clear();
+    car_err_que_.clear();
+    kf_armor_avg_err_ = car_avg_err_ = 0;
 }
 
 void ArmorTracker::set_target_label(ArmorType label) {
@@ -704,89 +703,92 @@ void ArmorTracker::status_remain_handler(StatusType current) {
     }
 }
 
-void ArmorTracker::update_pred_pos_history(
+void ArmorTracker::update_kf_armor_pred_pos_history(
     const double time,
-    const Eigen::Vector3f& kf_pred_pos,
-    const Eigen::Vector3f& car_pred_pos
+    const Vector3f& kf_pred_pos
 ) {
     kf_armor_pred_pos_history_.emplace_front(time, kf_pred_pos);
-    car_pred_pos_history_.emplace_front(time, car_pred_pos);
-    while (kf_armor_pred_pos_history_.size() > 100) kf_armor_pred_pos_history_.pop_back();
-    while (car_pred_pos_history_.size() > 100) car_pred_pos_history_.pop_back();
-}
-
-void ArmorTracker::update_pred_accuracy() {
-    auto iter_kf = std::find_if(
-        kf_armor_pred_pos_history_.begin(),
-        kf_armor_pred_pos_history_.end(),
-        [&](const auto& t) { return std::abs(std::get<0>(t) - current_update_time_) < 0.01; }
-    );
-    auto iter_car = std::find_if(
-        car_pred_pos_history_.begin(),
-        car_pred_pos_history_.end(),
-        [&](const auto& t) { return std::abs(std::get<0>(t) - current_update_time_) < 0.01; }
-    );
-    if (iter_kf != kf_armor_pred_pos_history_.end() && iter_car != car_pred_pos_history_.end()) {
-        const auto calc_pitch = [](const Eigen::Vector3f& v) {
-            return std::atan2(v.z(), std::hypot(v.x(), v.y()));
-        };
-        const auto calc_yaw = [](const Eigen::Vector3f& v) {
-            return std::atan2(v.y(), v.x());
-        };
-        auto kf_armor_pred_pos = std::get<1>(*iter_kf);
-        auto car_pred_pos = std::get<1>(*iter_car);
-        float kf_armor_pred_pitch = calc_pitch(kf_armor_pred_pos);
-        float kf_armor_pred_yaw = calc_yaw(kf_armor_pred_pos);
-        float car_pred_pitch = calc_pitch(car_pred_pos);
-        float car_pred_yaw = calc_yaw(car_pred_pos);
-        if (pushed_armors_.size() == 1) {
-            float observation_pitch = calc_pitch(pushed_armors_[0].translation);
-            float observation_yaw = calc_yaw(pushed_armors_[0].translation);
-            float kf_armor_diff = std::hypot(
-                kf_armor_pred_pitch - observation_pitch,
-                kf_armor_pred_yaw - observation_yaw
-            ) * kf_armor_pred_pos.norm();
-            float car_diff = std::hypot(
-                car_pred_pitch - observation_pitch,
-                car_pred_yaw - observation_yaw
-            ) * car_pred_pos.norm();
-            kf_armor_pred_accuracy_->update(Scalarf(kf_armor_diff < ACCURATE_ERR_THRESHOLD));
-            car_pred_accuracy_->update(Scalarf(car_diff < ACCURATE_ERR_THRESHOLD));
-        } else if (pushed_armors_.size() == 2) {
-            float observation_pitch0 = calc_pitch(pushed_armors_[0].translation);
-            float observation_yaw0 = calc_yaw(pushed_armors_[0].translation);
-            float observation_pitch1 = calc_pitch(pushed_armors_[1].translation);
-            float observation_yaw1 = calc_yaw(pushed_armors_[1].translation);
-            float kf_armor_diff0 = std::hypot(
-                kf_armor_pred_pitch - observation_pitch0,
-                kf_armor_pred_yaw - observation_yaw0
-            ) * kf_armor_pred_pos.norm();
-            float kf_armor_diff1 = std::hypot(
-                kf_armor_pred_pitch - observation_pitch1,
-                kf_armor_pred_yaw - observation_yaw1
-            ) * kf_armor_pred_pos.norm();
-            float car_diff0 = std::hypot(
-                car_pred_pitch - observation_pitch0,
-                car_pred_yaw - observation_yaw0
-            ) * car_pred_pos.norm();
-            float car_diff1 = std::hypot(
-                car_pred_pitch - observation_pitch1,
-                car_pred_yaw - observation_yaw1
-            ) * car_pred_pos.norm();
-            kf_armor_pred_accuracy_->update(
-                Scalarf(std::min(kf_armor_diff0, kf_armor_diff1) < ACCURATE_ERR_THRESHOLD)
-            );
-            car_pred_accuracy_->update(
-                Scalarf(std::min(car_diff0, car_diff1) < ACCURATE_ERR_THRESHOLD)
-            );
-        }
+    while (kf_armor_pred_pos_history_.size() > 2 * APPROXIMATE_FRAMERATE) {
+        kf_armor_pred_pos_history_.pop_back();
     }
 }
 
-std::tuple<Eigen::Vector3f, bool> ArmorTracker::predict_shoot_pos(
+void ArmorTracker::update_car_pred_pos_history(
+    const double time,
+    const Vector3f& car_pred_pos
+) {
+    car_pred_pos_history_.emplace_front(time, car_pred_pos);
+    while (car_pred_pos_history_.size() > 2 * APPROXIMATE_FRAMERATE) {
+        car_pred_pos_history_.pop_back();
+    }
+}
+
+void ArmorTracker::update_pred_accuracy() {
+    const auto calc_pitch = [](const Vector3f& v) {
+        return std::atan2(v.z(), std::hypot(v.x(), v.y()));
+    };
+    const auto calc_yaw = [](const Vector3f& v) {
+        return std::atan2(v.y(), v.x());
+    };
+    const auto update_err_que = [&](
+        const std::deque<std::tuple<double, Eigen::Vector3f>>& history,
+        std::deque<float>& err_que
+    ) {
+        auto iter = std::find_if(
+            history.begin(),
+            history.end(),
+            [&](const auto& t) {
+                return std::abs(std::get<0>(t) - current_update_time_) < 0.6 / APPROXIMATE_FRAMERATE;
+            }
+        );
+        if (iter != history.end()) {
+            auto pred_pos = std::get<1>(*iter);
+            float pred_pitch = calc_pitch(pred_pos);
+            float pred_yaw = calc_yaw(pred_pos);
+            if (pushed_armors_.size() == 1) {
+                float observation_pitch = calc_pitch(pushed_armors_[0].translation);
+                float observation_yaw = calc_yaw(pushed_armors_[0].translation);
+                float diff = std::hypot(
+                    pred_pitch - observation_pitch,
+                    pred_yaw - observation_yaw
+                ) * pred_pos.norm();
+                err_que.push_front(diff);
+            } else if (pushed_armors_.size() == 2) {
+                float observation_pitch0 = calc_pitch(pushed_armors_[0].translation);
+                float observation_yaw0 = calc_yaw(pushed_armors_[0].translation);
+                float observation_pitch1 = calc_pitch(pushed_armors_[1].translation);
+                float observation_yaw1 = calc_yaw(pushed_armors_[1].translation);
+                float diff0 = std::hypot(
+                    pred_pitch - observation_pitch0,
+                    pred_yaw - observation_yaw0
+                ) * pred_pos.norm();
+                float diff1 = std::hypot(
+                    pred_pitch - observation_pitch1,
+                    pred_yaw - observation_yaw1
+                ) * pred_pos.norm();
+                err_que.push_front(std::min(diff0, diff1));
+            }
+            while (err_que.size() > ERR_QUEUE_SIZE) err_que.pop_back();
+        }
+    };
+    const auto calc_err_avg = [](const std::deque<float>& err_que) {
+        float avg = 0;
+        int size = err_que.size(), div = size * (size + 1) / 2;
+        for (int i = 0; i < size; i++) {
+            avg += err_que[i] * (size - i) / div;
+        }
+        return avg;
+    };
+    update_err_que(kf_armor_pred_pos_history_, kf_armor_err_que_);
+    update_err_que(car_pred_pos_history_, car_err_que_);
+    kf_armor_avg_err_ = calc_err_avg(kf_armor_err_que_);
+    car_avg_err_ = calc_err_avg(car_err_que_);
+}
+
+std::tuple<Vector3f, bool> ArmorTracker::predict_shoot_pos(
     const float bullet_speed,
     const float img_to_fire_time,
-    const Eigen::Vector3f fric_to_basis,
+    const Vector3f fric_to_basis,
     const float gimbal_yaw_to_basis
 ) {
     if (target_label_ == ArmorType::OUTPOST) {
@@ -796,18 +798,24 @@ std::tuple<Eigen::Vector3f, bool> ArmorTracker::predict_shoot_pos(
     } else {
         const float img_to_hit_time =
             car_observer_->predict_img_to_hit_time(bullet_speed, img_to_fire_time, fric_to_basis);
-        auto car_pred = car_observer_->predict_shoot_pos(gimbal_yaw_to_basis, img_to_hit_time);
         auto kf_pred = std::make_tuple(
             kf_main_observing_armor_->value() + kf_main_observing_armor_->derivative() * img_to_hit_time,
             car_status_->status() == StatusType::TRACKING || car_status_->status() == StatusType::TEMP_LOST
         );
-        update_pred_pos_history(
-            current_update_time_ + img_to_hit_time,
-            std::get<0>(kf_pred),
-            std::get<0>(car_pred)
-        );
-        if (car_observer_->is_antispin_palstance_ &&
-            car_pred_accuracy_->value().value() < CAR_ACCURACY_THRESHOLD) {
+        auto car_pred = car_observer_->predict_shoot_pos(gimbal_yaw_to_basis, img_to_hit_time);
+        if (std::get<1>(kf_pred)) {
+            update_kf_armor_pred_pos_history(
+                current_update_time_ + img_to_hit_time,
+                std::get<0>(kf_pred)
+            );
+        }
+        if (std::get<1>(car_pred)) {
+            update_car_pred_pos_history(
+                current_update_time_ + img_to_hit_time,
+                std::get<0>(car_pred)
+            );
+        }
+        if (car_observer_->is_antispin_palstance_ && car_avg_err_ < AVG_ERR_THRESHOLD) {
             return car_pred;
         } else {
             return kf_pred;
@@ -833,16 +841,19 @@ void ArmorTracker::print_colored_status_info() const {
         car_observer_->print_colored_status_info();
     }
     if (target_label_ != ArmorType::OUTPOST) {
-        std::cout << termcolor::bold << "MainArmorAccuracy " << termcolor::reset;
-        std::printf("%.0f%%", kf_armor_pred_accuracy_->value().value() * 100);
+        std::cout << termcolor::bold << "MainArmorAvgErr " << termcolor::reset;
+        std::printf("%4.1f", kf_armor_avg_err_ * 100);
         std::cout << std::endl;
-        std::cout << termcolor::bold << "CarAccuracy       " << termcolor::reset;
-        std::printf("%.0f%%", car_pred_accuracy_->value().value() * 100);
+        std::cout << termcolor::bold << "CarAvgErr       " << termcolor::reset;
+        std::printf("%4.1f", car_avg_err_ * 100);
         std::cout << std::endl;
+    }
+    if (kf_armor_avg_err_ > AVG_ERR_THRESHOLD && car_avg_err_ > AVG_ERR_THRESHOLD) {
+        std::cout << termcolor::yellow << "Low tracking accuracy!" << termcolor::reset << std::endl;
     }
 }
 
-std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>> ArmorTracker::get_all_armors() const {
+std::vector<std::tuple<Vector3f, Quaternionf>> ArmorTracker::get_all_armors() const {
     if (target_label_ == ArmorType::OUTPOST) {
         return outpost_observer_->get_all_armors();
     } else {

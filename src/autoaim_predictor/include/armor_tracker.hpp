@@ -118,14 +118,12 @@ public:
 private:
     void status_change_handler(StatusType from, StatusType to);
     void status_remain_handler(StatusType current);
-    void update_pred_pos_history(
-        const double time,
-        const Eigen::Vector3f& kf_pred_pos,
-        const Eigen::Vector3f& car_pred_pos
-    );
+    void update_kf_armor_pred_pos_history(const double time, const Eigen::Vector3f& kf_pred_pos);
+    void update_car_pred_pos_history(const double time, const Eigen::Vector3f& car_pred_pos);
     void update_pred_accuracy();
 
-    float ACCURATE_ERR_THRESHOLD, CAR_ACCURACY_THRESHOLD;
+    unsigned ERR_QUEUE_SIZE, APPROXIMATE_FRAMERATE;
+    float AVG_ERR_THRESHOLD;
     
     ArmorType target_label_;
     std::vector<Armor> pushed_armors_;
@@ -139,5 +137,6 @@ private:
 
     std::deque<std::tuple<double, Eigen::Vector3f>> kf_armor_pred_pos_history_; // 单独装甲板的历史预测时间及预测位置
     std::deque<std::tuple<double, Eigen::Vector3f>> car_pred_pos_history_; // 整车的历史预测时间及预测位置
-    std::unique_ptr<EMAF<1>> kf_armor_pred_accuracy_, car_pred_accuracy_; // 准确度的惯性滤波
+    std::deque<float> kf_armor_err_que_, car_err_que_; // 历史预测误差（由误差角度*距离算出）
+    float kf_armor_avg_err_, car_avg_err_; // 由历史预测误差加权平均算出来的误差
 };
