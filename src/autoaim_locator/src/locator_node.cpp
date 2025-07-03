@@ -31,6 +31,7 @@ private:
 
     std::unique_ptr<PnPSolver> pnp_solver_;
     std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
+    std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
 
     rclcpp::Subscription<CameraInfo>::SharedPtr camera_info_sub_;
@@ -39,6 +40,7 @@ private:
 };
 
 LocatorNode::LocatorNode(const rclcpp::NodeOptions& options): Node("autoaim_locator", options) {
+    tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
     tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
     pnp_solver_ = std::make_unique<PnPSolver>();

@@ -17,7 +17,7 @@ public:
     void preprocess();
     void infer();
     void postprocess();
-    cv::Mat debug_draw_armors();
+    cv::Mat debug_draw_armors() const;
 
     cv::Mat input_image_;
     std::vector<hw_sentry_interfaces::msg::ArmorDetection> armor_detections_;

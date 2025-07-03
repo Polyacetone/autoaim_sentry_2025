@@ -9,20 +9,13 @@
 #include <openvino_infer_engine.hpp>
 
 namespace autoaim_detector {
-float get_fps() {
-    static auto prev = std::chrono::high_resolution_clock::now();
-    auto now = std::chrono::high_resolution_clock::now();
-    float elapsed_sec = (now - prev).count() / 1e9;
-    prev = now;
-    return 1 / elapsed_sec;
-}
-
 class DetectorNode: public rclcpp::Node {
 public:
     explicit DetectorNode(const rclcpp::NodeOptions& options);
 
 private:
     void img_callback(const sensor_msgs::msg::Image::SharedPtr msg);
+    float get_framerate();
 
     std::string input_image_topic_;
     std::string target_enemy_topic_;
@@ -35,6 +28,8 @@ private:
     bool enable_fps_;
     float confidence_threshold_;
     float nms_threshold_;
+
+    std::chrono::high_resolution_clock::time_point prev_callback_time_;
 
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
     rclcpp::Subscription<hw_sentry_interfaces::msg::TargetEnemy>::SharedPtr target_enemy_sub_;
@@ -87,9 +82,16 @@ DetectorNode::DetectorNode(const rclcpp::NodeOptions& options): Node("autoaim_de
     );
 }
 
+float DetectorNode::get_framerate() {
+    auto current_time = std::chrono::high_resolution_clock::now();
+    float duration = (current_time - prev_callback_time_).count() / 1e9;
+    prev_callback_time_ = current_time;
+    return 1 / duration;
+}
+
 void DetectorNode::img_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
     if (enable_fps_) {
-        RCLCPP_INFO(get_logger(), "Detection FPS: %.0f", get_fps());
+        RCLCPP_INFO(get_logger(), "Detection FPS: %.0f", get_framerate());
     }
 
     const auto cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");

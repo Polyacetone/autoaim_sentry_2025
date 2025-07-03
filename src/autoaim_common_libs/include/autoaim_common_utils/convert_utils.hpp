@@ -183,7 +183,7 @@ template<> struct PoseTraits<geometry_msgs::msg::Transform> {
     template<PointLike T, QuaternionLike R>
     static geometry_msgs::msg::Transform create(T translation, R rotation) {
         geometry_msgs::msg::Transform t;
-        t.translation = convert_to<geometry_msgs::msg::Point>(translation);
+        t.translation = convert_to<geometry_msgs::msg::Vector3>(translation);
         t.rotation = convert_to<geometry_msgs::msg::Quaternion>(rotation);
         return t;
     }

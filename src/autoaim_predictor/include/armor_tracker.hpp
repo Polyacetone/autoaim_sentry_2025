@@ -10,7 +10,7 @@
 #include <autoaim_common_definitions/common_definitions.hpp>
 #include <termcolor/termcolor.hpp>
 #include <kalman_filter.hpp>
-#include <low_pass_filter.hpp>
+#include <ema_filter.hpp>
 #include <trajectory.hpp>
 #include <tracker_status.hpp>
 
@@ -47,7 +47,7 @@ public:
     bool is_antispin_palstance_ = false; // 当前是否处于反陀螺角速度
 
 private:
-    const unsigned ARMORS_COUNT = 4; // 一辆车有4个装甲板
+    const unsigned ARMORS_COUNT = 4; // 车有4个装甲板
     float INITIAL_RADIUS, SWITCH_ARMOR_ANGLE;
     float ENTER_ANTISPIN_PALSTANCE, EXIT_ANTISPIN_PALSTANCE;
     float ANTISPIN_FOLLOW_ANGLE, ANTISPIN_SHOOT_ANGLE;
@@ -57,9 +57,9 @@ private:
     unsigned main_observing_armor_id_ = 0;
     float accumulated_yaw_; // 累计的0号装甲板yaw角，作为观测量更新kf_rotation_angle
     float prev_main_observing_yaw_; // 上一帧作为主要观测装甲板的yaw角，用于逐差更新accumulated_yaw
-    std::unique_ptr<LPF<1>> radius_[4]; // 每个装甲板对应的半径
-    std::unique_ptr<LPF<1>> height_[4]; // 每个装甲板相对于0号装甲板的高度
-    std::unique_ptr<LPF<3>> axis_; // 车的旋转轴
+    std::unique_ptr<EMAF<1>> radius_[4]; // 每个装甲板对应的半径
+    std::unique_ptr<EMAF<1>> height_[4]; // 每个装甲板相对于0号装甲板的高度
+    std::unique_ptr<EMAF<3>> axis_; // 车的旋转轴
     std::unique_ptr<KF<3>> kf_center_; // 车中心的位置。车中心在转轴上的高度由0号装甲板确定，即认为0号装甲板对应的中心就是车的中心
     std::unique_ptr<KF<1>> kf_yaw_; // 0号装甲板累计绕旋转轴转的角度
 };
@@ -110,7 +110,7 @@ public:
         const float img_to_fire_time,
         const Eigen::Vector3f fric_to_basis,
         const float gimbal_yaw_to_basis
-    ) const;
+    );
 
     void print_colored_status_info() const;
     std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>> get_all_armors() const;
@@ -118,16 +118,26 @@ public:
 private:
     void status_change_handler(StatusType from, StatusType to);
     void status_remain_handler(StatusType current);
+    void update_pred_pos_history(
+        const double time,
+        const Eigen::Vector3f& kf_pred_pos,
+        const Eigen::Vector3f& car_pred_pos
+    );
+    void update_pred_accuracy();
+
+    float ACCURATE_ERR_THRESHOLD, CAR_ACCURACY_THRESHOLD;
     
     ArmorType target_label_;
     std::vector<Armor> pushed_armors_;
     double prev_update_time_, current_update_time_;
 
     std::unique_ptr<KF<3>> kf_main_observing_armor_;
-
     std::unique_ptr<TrackerStatus> car_status_;
     std::unique_ptr<CarObserver> car_observer_;
-
     std::unique_ptr<TrackerStatus> outpost_status_;
     std::unique_ptr<OutpostObserver> outpost_observer_;
+
+    std::deque<std::tuple<double, Eigen::Vector3f>> kf_armor_pred_pos_history_; // 单独装甲板的历史预测时间及预测位置
+    std::deque<std::tuple<double, Eigen::Vector3f>> car_pred_pos_history_; // 整车的历史预测时间及预测位置
+    std::unique_ptr<EMAF<1>> kf_armor_pred_accuracy_, car_pred_accuracy_; // 准确度的惯性滤波
 };

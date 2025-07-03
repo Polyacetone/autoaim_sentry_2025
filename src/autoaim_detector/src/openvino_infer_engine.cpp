@@ -125,7 +125,7 @@ void OpenVINOInferEngine::postprocess() {
     }
 }
 
-cv::Mat OpenVINOInferEngine::debug_draw_armors() {
+cv::Mat OpenVINOInferEngine::debug_draw_armors() const {
     cv::Mat image = input_image_.clone();
     const std::vector<std::string> name = {
         "Sentry",

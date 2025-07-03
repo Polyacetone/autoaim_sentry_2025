@@ -93,18 +93,14 @@ void SelectorNode::select_armors(
     static int center_x_prev = 0;
     std::vector<ArmorDetection> filtered;
     // 筛选出目标颜色和标签的装甲板
-    for (const auto& armor: src) {
-        if (static_cast<ArmorType>(armor.label) == target_label_) {
-            if (static_cast<ArmorColor>(armor.color) == target_color_) {
-                filtered.emplace_back(armor);
-            } else if (static_cast<ArmorColor>(armor.color) == ArmorColor::GRAY) { // 特殊处理灰色装甲板
-                if (abs(get_center_x(armor) - center_x_prev) <= 15) {
-                    // 这里只根据灰色装甲板位置与上次瞄的位置差判断是否是被打成灰的
-                    filtered.emplace_back(armor);
-                }
-            }
+    std::copy_if(src.begin(), src.end(), std::back_inserter(filtered),
+        [&](const auto& armor) -> bool {
+            return static_cast<ArmorType>(armor.label) == target_label_
+                && (static_cast<ArmorColor>(armor.color) == target_color_
+                    || (static_cast<ArmorColor>(armor.color) == ArmorColor::GRAY
+                        && abs(get_center_x(armor) - center_x_prev) <= 15)); // 如果是灰色装甲板则根据和之前的位置差异判断是否是同一个
         }
-    }
+    );
     if (filtered.empty()) {
         center_x_prev = 0;
         return;

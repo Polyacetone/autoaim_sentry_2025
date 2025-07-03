@@ -4,6 +4,9 @@
 # 均采用国际单位制，距离为m，时间为s，角度为弧度
 
 ArmorTracker:
+  accuracy_filter_ratio: 0.8
+  accurate_err_threshold: 0.1
+  car_accuracy_threshold: 0.6
   kf_main_observing_armor:
     process_noise: !!opencv-matrix
       rows: 6

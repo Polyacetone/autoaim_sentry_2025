@@ -3,9 +3,9 @@
 #include <Eigen/Dense>
 
 template<unsigned D>
-class LPF {
+class EMAF {
 public:
-    explicit LPF(const float filter_ratio);
+    explicit EMAF(const float filter_ratio);
     void reset();
     void initialize(const Eigen::Vector<float, D>& val);
     void update(const Eigen::Vector<float, D>& meas);

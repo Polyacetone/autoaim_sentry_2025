@@ -19,6 +19,7 @@ KF<MEASUREMENT_DIM>::KF(const cv::FileNode& fn) :
     }
     cv::cv2eigen(Q_cv, Q_);
     cv::cv2eigen(R_cv, R_);
+    reset();
 }
 
 template <unsigned MEASUREMENT_DIM>

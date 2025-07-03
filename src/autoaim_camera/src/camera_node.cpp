@@ -1,6 +1,7 @@
-#include <MvCameraControl.h>
+#include <execution>
 #include <rclcpp/rclcpp.hpp>
 #include <opencv2/opencv.hpp>
+#include <MvCameraControl.h>
 #include <camera_info_manager/camera_info_manager.hpp>
 #include <image_transport/image_transport.hpp>
 
@@ -9,17 +10,7 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 
 namespace autoaim_camera {
-double to_sec(builtin_interfaces::msg::Time t) {
-    return t.sec + t.nanosec * 1e-9;
-}
-
-float get_fps() {
-    static auto prev = std::chrono::high_resolution_clock::now();
-    auto now = std::chrono::high_resolution_clock::now();
-    float elapsed_sec = (now - prev).count() / 1e9;
-    prev = now;
-    return 1 / elapsed_sec;
-}
+double to_sec(builtin_interfaces::msg::Time t) { return static_cast<rclcpp::Time>(t).seconds(); }
 
 class CameraNode: public rclcpp::Node {
 public:
@@ -29,10 +20,11 @@ public:
 private:
     void get_parameters();
     void open_cam();
-    void start_grabbing();
-    void close_cam();
+    void start_grabbing() const;
+    void close_cam() const;
+    bool catch_error(int ret, const char* description) const;
     void capture_thread();
-    bool catch_error(int ret, const char* description);
+    float get_framerate();
 
     // 从imu_timestamp_buffer_中获取图像时间戳对应的imu时间戳
     rclcpp::Time get_corresponding_imu_timestamp(const rclcpp::Time& img_time) const;
@@ -49,6 +41,7 @@ private:
     std::unique_ptr<camera_info_manager::CameraInfoManager> camera_info_manager_;
     std::deque<rclcpp::Time> imu_timestamp_buffer_;
     std::thread capture_thread_;
+    std::chrono::high_resolution_clock::time_point prev_callback_time_;
 };
 
 CameraNode::CameraNode(const rclcpp::NodeOptions& options): Node("autoaim_camera", options) {
@@ -65,18 +58,25 @@ CameraNode::~CameraNode() {
     close_cam();
 }
 
-void CameraNode::close_cam() {
+void CameraNode::close_cam() const {
     catch_error(MV_CC_StopGrabbing(cam_handle_), "stop grabbing");
     catch_error(MV_CC_CloseDevice(cam_handle_), "close device");
     catch_error(MV_CC_DestroyHandle(cam_handle_), "destroy handle");
 }
 
-bool CameraNode::catch_error(int ret, const char* description) {
+bool CameraNode::catch_error(int ret, const char* description) const {
     if (ret != MV_OK) {
         RCLCPP_ERROR(this->get_logger(), "Error in \"%s\": %#x", description, ret);
         return true;
     }
     return false;
+}
+
+float CameraNode::get_framerate() {
+    auto current_time = std::chrono::high_resolution_clock::now();
+    float duration = (current_time - prev_callback_time_).count() / 1e9;
+    prev_callback_time_ = current_time;
+    return 1 / duration;
 }
 
 void CameraNode::get_parameters() {
@@ -144,6 +144,7 @@ void CameraNode::capture_thread() {
             CV_8UC3
         );
         std::copy(
+            std::execution::par_unseq,
             out_frame.pBufAddr,
             out_frame.pBufAddr + out_frame.stFrameInfo.nFrameLen + 1,
             capture_frame.data
@@ -158,12 +159,17 @@ void CameraNode::capture_thread() {
         image_msg.width = resized_img.cols;
         image_msg.step = image_msg.width * 3;
         image_msg.data.resize(image_msg.width * image_msg.height * 3);
-        std::copy(resized_img.data, resized_img.data + image_msg.data.size() + 1, image_msg.data.data());
+        std::copy(
+            std::execution::par_unseq,
+            resized_img.data,
+            resized_img.data + image_msg.data.size() + 1,
+            image_msg.data.data()
+        );
         
         camera_pub_.publish(image_msg, camera_info_msg);
 
         if (enable_fps_) {
-            RCLCPP_INFO(this->get_logger(), "Camera FPS: %.0f", get_fps());
+            RCLCPP_INFO(this->get_logger(), "Camera FPS: %.0f", get_framerate());
         }
     }
 }
@@ -201,7 +207,7 @@ void CameraNode::open_cam() {
     catch_error(MV_CC_OpenDevice(cam_handle_), "open device");
 }
 
-void CameraNode::start_grabbing() {
+void CameraNode::start_grabbing() const {
     // 设置像素格式
     catch_error(MV_CC_SetEnumValue(cam_handle_, "PixelFormat", PixelType_Gvsp_BGR8_Packed), "set pixel format");
 
@@ -244,15 +250,18 @@ void CameraNode::start_grabbing() {
 }
 
 rclcpp::Time CameraNode::get_corresponding_imu_timestamp(const rclcpp::Time& img_time) const {
-    for (const auto& imu_timestamp: imu_timestamp_buffer_) {
-        const double diff = to_sec(img_time) - to_sec(imu_timestamp);
-        // 相机传输线带宽约3000Mbps，所以大概需要8ms才能把图像传过来。相机处理时间大概是2ms的数量级
-        // offset = 曝光时间 + 图像处理时间 + 图像传输时间 - 串口传输时间
-        const double offset = 8e-3 + 2e-3 + exposure_ / 1e6;
-        if (offset - 2e-3 < diff && diff < offset + 2e-3) {
-            return imu_timestamp;
+    auto iter = std::find_if(
+        imu_timestamp_buffer_.begin(),
+        imu_timestamp_buffer_.end(),
+        [&](const auto& imu_timestamp) -> bool {
+            const double diff = to_sec(img_time) - to_sec(imu_timestamp);
+            // 相机传输线带宽约3000Mbps，所以大概需要8ms才能把图像传过来。相机处理时间大概是2ms的数量级
+            // offset = 曝光时间 + 图像处理时间 + 图像传输时间 - 串口传输时间
+            const double offset = 8e-3 + 2e-3 + exposure_ / 1e6;
+            return offset - 2e-3 < diff && diff < offset + 2e-3;
         }
-    }
+    );
+    if (iter != imu_timestamp_buffer_.end()) return *iter;
     if (imu_timestamp_buffer_.empty()) {
         RCLCPP_WARN(
             get_logger(),
@@ -265,7 +274,6 @@ rclcpp::Time CameraNode::get_corresponding_imu_timestamp(const rclcpp::Time& img
             to_sec(img_time) - to_sec(imu_timestamp_buffer_[0])
         );
     }
-    
     return img_time;
 }
 } // namespace autoaim_camera

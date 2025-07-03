@@ -7,6 +7,7 @@ TrackerStatus::TrackerStatus(
 ): status_change_handler(status_change_handler), status_remain_handler(status_remain_handler) {
     MAX_TEMP_LOST_FRAMES = static_cast<int>(fn["max_temp_lost_frames"]);
     MAX_CONVERGING_FRAMES = static_cast<int>(fn["max_converging_frames"]);
+    reset();
 }
 
 void TrackerStatus::set_next_status(StatusType status) {
