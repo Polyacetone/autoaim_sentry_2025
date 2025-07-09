@@ -6,7 +6,7 @@
 #include <hw_sentry_interfaces/msg/detections.hpp>
 #include <hw_sentry_interfaces/msg/target_enemy.hpp>
 
-#include <openvino_infer_engine.hpp>
+#include <autoaim_detector/openvino_infer_engine.hpp>
 
 namespace autoaim_detector {
 class DetectorNode: public rclcpp::Node {

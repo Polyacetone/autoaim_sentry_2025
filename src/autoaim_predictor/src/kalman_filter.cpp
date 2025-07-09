@@ -1,4 +1,4 @@
-#include <kalman_filter.hpp>
+#include <autoaim_predictor/kalman_filter.hpp>
 
 template <unsigned MEASUREMENT_DIM>
 KF<MEASUREMENT_DIM>::KF(const cv::FileNode& fn) : 

@@ -1,4 +1,4 @@
-#include <armor_tracker.hpp>
+#include <autoaim_predictor/armor_tracker.hpp>
 
 using namespace Eigen;
 using Scalarf = Vector<float, 1>;
@@ -145,6 +145,7 @@ Armor::Armor(const Vector3f& translation, const Quaternionf& rotation):
 CarObserver::CarObserver(const cv::FileNode& fn) {
     INITIAL_RADIUS = static_cast<float>(fn["initial_radius"]);
     SWITCH_ARMOR_ANGLE = static_cast<float>(fn["switch_armor_angle"]);
+    DELTA_YAW_UPDATE_THRESHOLD = static_cast<float>(fn["delta_yaw_update_threshold"]);
     ENTER_ANTISPIN_PALSTANCE = static_cast<float>(fn["enter_antispin_palstance"]);
     EXIT_ANTISPIN_PALSTANCE = static_cast<float>(fn["exit_antispin_palstance"]);
     ANTISPIN_FOLLOW_ANGLE = static_cast<float>(fn["antispin_follow_angle"]);
@@ -251,7 +252,9 @@ void CarObserver::update(const std::vector<Armor>& armors) {
         is_armor_switched_ = false;
     }
     accumulated_yaw_ += delta_yaw;
-    kf_yaw_->update(Scalarf(accumulated_yaw_));
+    if (std::abs(delta_yaw) < DELTA_YAW_UPDATE_THRESHOLD) {
+        kf_yaw_->update(Scalarf(accumulated_yaw_));
+    }
     if (armors.size() == 1) { // 只有一块装甲板的时候只能算旋转轴和中心
         Vector3f car_axis = calc_rotation_axis(armors[0]);
         axis_->update(car_axis);
@@ -444,6 +447,18 @@ std::vector<std::tuple<Vector3f, Quaternionf>> CarObserver::get_all_armors() con
     return armors;
 }
 
+void CarObserver::write_predictor_status(hw_sentry_interfaces::msg::PredictorStatus& status) const {
+    for (unsigned i = 0; i < ARMORS_COUNT; i++) {
+        status.radius.emplace_back(radius_[i]->value().value());
+        status.height.emplace_back(height_[i]->value().value());
+    }
+    status.axis = utils::convert_to<geometry_msgs::msg::Point32>(axis_->value());
+    status.center = utils::convert_to<geometry_msgs::msg::Point32>(kf_center_->value());
+    status.velocity = utils::convert_to<geometry_msgs::msg::Point32>(kf_center_->derivative());
+    status.yaw = kf_yaw_->value().value();
+    status.palstance = kf_yaw_->derivative().value();
+}
+
 /**********************************************************************************
 *******************************  OutpostObserver  *********************************
 ***********************************************************************************/
@@ -451,6 +466,7 @@ std::vector<std::tuple<Vector3f, Quaternionf>> CarObserver::get_all_armors() con
 OutpostObserver::OutpostObserver(const cv::FileNode& fn) {
     RADIUS = static_cast<float>(fn["radius"]);
     SWITCH_ARMOR_ANGLE = static_cast<float>(fn["switch_armor_angle"]);
+    DELTA_YAW_UPDATE_THRESHOLD = static_cast<float>(fn["delta_yaw_update_threshold"]);
     OUTPOST_FOLLOW_ANGLE = static_cast<float>(fn["outpost_follow_angle"]);
     OUTPOST_CAN_SHOOT_ANGLE = static_cast<float>(fn["outpost_can_shoot_angle"]);
     kf_center_ = std::make_unique<KF<3>>(fn["kf_center"]);
@@ -494,7 +510,9 @@ void OutpostObserver::update(const std::vector<Armor>& armors) {
         is_armor_switched_ = false;
     }
     accumulated_yaw_ += delta_yaw;
-    kf_yaw_->update(Scalarf(accumulated_yaw_));
+    if (std::abs(delta_yaw) < DELTA_YAW_UPDATE_THRESHOLD) {
+        kf_yaw_->update(Scalarf(accumulated_yaw_));
+    }
     Vector3f car_center = calc_car_center(armors[0], RADIUS, Vector3f::UnitZ(), 0);
     kf_center_->update(car_center);
     prev_main_observing_yaw_ = armors[0].yaw;
@@ -599,28 +617,39 @@ std::vector<std::tuple<Vector3f, Quaternionf>> OutpostObserver::get_all_armors()
     return armors;
 }
 
+void OutpostObserver::write_predictor_status(hw_sentry_interfaces::msg::PredictorStatus& status) const {
+    for (unsigned i = 0; i < ARMORS_COUNT; i++) {
+        status.radius.emplace_back(RADIUS);
+        status.height.emplace_back(0);
+    }
+    status.axis = utils::convert_to<geometry_msgs::msg::Point32>(Eigen::Vector3f(0, 0, 1));
+    status.center = utils::convert_to<geometry_msgs::msg::Point32>(kf_center_->value());
+    status.velocity = utils::convert_to<geometry_msgs::msg::Point32>(kf_center_->derivative());
+    status.yaw = kf_yaw_->value().value();
+    status.palstance = kf_yaw_->derivative().value();
+}
+
 /**********************************************************************************
 *********************************  ArmorTracker  **********************************
 ***********************************************************************************/
 
-ArmorTracker::ArmorTracker(const std::string& params_path) {
-    cv::FileStorage fs(params_path, cv::FileStorage::READ);
-    AVG_ERR_THRESHOLD = static_cast<float>(fs["ArmorTracker"]["avg_err_threshold"]);
-    ERR_QUEUE_SIZE = static_cast<int>(fs["ArmorTracker"]["err_queue_size"]);
-    APPROXIMATE_FRAMERATE = static_cast<int>(fs["ArmorTracker"]["approximate_framerate"]);
-    kf_main_observing_armor_ = std::make_unique<KF<3>>(fs["ArmorTracker"]["kf_main_observing_armor"]);
+ArmorTracker::ArmorTracker(const cv::FileNode& fn) {
+    AVG_ERR_THRESHOLD = static_cast<float>(fn["avg_err_threshold"]);
+    ERR_QUEUE_SIZE = static_cast<int>(fn["err_queue_size"]);
+    APPROXIMATE_FRAMERATE = static_cast<int>(fn["approximate_framerate"]);
+    kf_main_observing_armor_ = std::make_unique<KF<3>>(fn["kf_main_observing_armor"]);
     car_status_ = std::make_unique<TrackerStatus>(
-        fs["CarStatus"],
+        fn["car_status"],
         [this](StatusType from, StatusType to) { status_change_handler(from, to); },
         [this](StatusType curr) { status_remain_handler(curr); }
     );
     outpost_status_ = std::make_unique<TrackerStatus>(
-        fs["OutpostStatus"],
+        fn["outpost_status"],
         [this](StatusType from, StatusType to) { status_change_handler(from, to); },
         [this](StatusType curr) { status_remain_handler(curr); }
     );
-    car_observer_ = std::make_unique<CarObserver>(fs["CarObserver"]);
-    outpost_observer_ = std::make_unique<OutpostObserver>(fs["OutpostObserver"]);
+    car_observer_ = std::make_unique<CarObserver>(fn["car_observer"]);
+    outpost_observer_ = std::make_unique<OutpostObserver>(fn["outpost_observer"]);
     reset();
 }
 
@@ -858,5 +887,17 @@ std::vector<std::tuple<Vector3f, Quaternionf>> ArmorTracker::get_all_armors() co
         return outpost_observer_->get_all_armors();
     } else {
         return car_observer_->get_all_armors();
+    }
+}
+
+void ArmorTracker::write_predictor_status(hw_sentry_interfaces::msg::PredictorStatus& status) const {
+    status.mode = static_cast<int>(AutoaimMode::ARMOR);
+    status.label = static_cast<int>(target_label_);
+    if (target_label_ == ArmorType::OUTPOST) {
+        status.tracker_status = static_cast<int>(outpost_status_->status());
+        outpost_observer_->write_predictor_status(status);
+    } else {
+        status.tracker_status = static_cast<int>(car_status_->status());
+        car_observer_->write_predictor_status(status);
     }
 }

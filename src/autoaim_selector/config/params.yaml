@@ -4,6 +4,9 @@
     default_target_label: 0 # 没收到决策消息时的默认目标编号，用于调试。0:sentry, 1:1, 2:2, 3:3, 4:4, 5:outpost, 6:base
     default_target_color: 0 # 没收到串口消息时的默认目标颜色，用于调试。0:blue, 1:red
 
+    big_armor_length_height_threshold: 2.4
+    small_armor_length_height_threshold: 1.4
+
     ### Subscribe topics
     detections_topic: "autoaim/detector/detections"
     robot_color_topic: "serial/robot_color" # 根据自己的颜色判断击打目标颜色

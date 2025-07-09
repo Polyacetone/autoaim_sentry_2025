@@ -1,4 +1,4 @@
-#include <pnp_solver.hpp>
+#include <autoaim_locator/pnp_solver.hpp>
 
 tf2::Transform PnPSolver::solve_pnp(
     const hw_sentry_interfaces::msg::ArmorDetection& detection,

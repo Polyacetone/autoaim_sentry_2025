@@ -11,7 +11,7 @@
 #include <hw_sentry_interfaces/msg/detections.hpp>
 #include <hw_sentry_interfaces/msg/poses.hpp>
 
-#include <pnp_solver.hpp>
+#include <autoaim_locator/pnp_solver.hpp>
 #include <autoaim_common_utils/tf_utils.hpp>
 #include <autoaim_common_utils/convert_utils.hpp>
 
@@ -124,8 +124,7 @@ Poses LocatorNode::solve_armor_detections(const Detections::SharedPtr msg) {
     else poses.header.frame_id = "chassis";
 
     auto gimbal_to_basis = chassis_to_basis * gimbal_to_chassis;
-    auto gimbal_ypr =
-        utils::to_euler_ypr(gimbal_to_basis.getRotation());
+    auto gimbal_ypr = utils::to_euler_ypr(gimbal_to_basis.getRotation());
     
     for (const auto& detection: msg->armor_detections) {
         auto armor_to_cam = pnp_solver_->solve_pnp(detection, gimbal_ypr);

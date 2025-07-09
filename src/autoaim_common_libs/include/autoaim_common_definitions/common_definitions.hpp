@@ -2,14 +2,14 @@
 
 #include <stdexcept>
 
-enum class ArmorColor {
+enum class ArmorColor: int {
     NONE = -1,
     BLUE = 0,
     RED = 1,
     GRAY = 2
 };
 
-enum class ArmorType {
+enum class ArmorType: int {
     NONE = -1,
     SENTRY = 0,
     ONE = 1,
@@ -20,7 +20,7 @@ enum class ArmorType {
     BASE = 6
 };
 
-enum class AutoaimMode {
+enum class AutoaimMode: int {
     NONE = -1,
     ARMOR = 0,
     BUFF = 1,

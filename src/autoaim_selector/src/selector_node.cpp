@@ -2,8 +2,6 @@
 
 #include <hw_sentry_interfaces/msg/detections.hpp>
 #include <hw_sentry_interfaces/msg/robot_color.hpp>
-#include <hw_sentry_interfaces/msg/enemy_priority.hpp>
-#include <hw_sentry_interfaces/msg/comp_robots_hp.hpp>
 #include <hw_sentry_interfaces/msg/target_enemy.hpp>
 
 #include <autoaim_common_definitions/common_definitions.hpp>
@@ -22,6 +20,7 @@ private:
     AutoaimMode mode_ = AutoaimMode::NONE;
     ArmorColor target_color_ = ArmorColor::NONE;
     ArmorType target_label_ = ArmorType::NONE;
+    float big_armor_length_height_threshold_, small_armor_length_height_threshold_;
 
     rclcpp::Subscription<Detections>::SharedPtr detections_sub_;
     rclcpp::Subscription<RobotColor>::SharedPtr robot_color_sub_;
@@ -34,6 +33,8 @@ SelectorNode::SelectorNode(const rclcpp::NodeOptions& options): Node("autoaim_se
     mode_ = static_cast<AutoaimMode>(declare_parameter<int>("default_mode"));
     target_label_ = static_cast<ArmorType>(declare_parameter<int>("default_target_label"));
     target_color_ = static_cast<ArmorColor>(declare_parameter<int>("default_target_color"));
+    big_armor_length_height_threshold_ = declare_parameter<float>("big_armor_length_height_threshold");
+    small_armor_length_height_threshold_ = declare_parameter<float>("small_armor_length_height_threshold");
 
     std::string detections_sub_topic = declare_parameter<std::string>("detections_topic");
     std::string target_enemy_sub_topic = declare_parameter<std::string>("target_enemy_topic");
@@ -90,12 +91,26 @@ void SelectorNode::select_armors(
     constexpr auto get_area = [](const ArmorDetection& d) -> int {
         return (d.br.x - d.tl.x) * (d.br.y - d.tl.y);
     };
+    constexpr auto get_length_height_ratio = [](const ArmorDetection& d) -> float {
+        const float length = std::hypot(
+            (d.tr.x + d.br.x) / 2 - (d.tl.x + d.bl.x) / 2,
+            (d.tr.y + d.br.y) / 2 - (d.tl.y + d.bl.y) / 2
+        );
+        const float height = (
+            std::hypot(d.tl.x - d.bl.x, d.tl.y - d.bl.y)
+            + std::hypot(d.tr.x - d.br.x, d.tr.y - d.br.y)
+        ) / 2;
+        return length / height;
+    };
     static int center_x_prev = 0;
     std::vector<ArmorDetection> filtered;
     // 筛选出目标颜色和标签的装甲板
     std::copy_if(src.begin(), src.end(), std::back_inserter(filtered),
         [&](const auto& armor) -> bool {
             return static_cast<ArmorType>(armor.label) == target_label_
+                && get_length_height_ratio(armor) > (defs::is_big_armor(target_label_)
+                    ? big_armor_length_height_threshold_
+                    : small_armor_length_height_threshold_)
                 && (static_cast<ArmorColor>(armor.color) == target_color_
                     || (static_cast<ArmorColor>(armor.color) == ArmorColor::GRAY
                         && abs(get_center_x(armor) - center_x_prev) <= 15)); // 如果是灰色装甲板则根据和之前的位置差异判断是否是同一个

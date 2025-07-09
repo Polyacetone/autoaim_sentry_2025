@@ -4,15 +4,16 @@
 #include <opencv2/opencv.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
+#include <hw_sentry_interfaces/msg/predictor_status.hpp>
 #include <autoaim_common_utils/tf_utils.hpp>
 #include <autoaim_common_utils/convert_utils.hpp>
 #include <autoaim_common_utils/math_utils.hpp>
 #include <autoaim_common_definitions/common_definitions.hpp>
 #include <termcolor/termcolor.hpp>
-#include <kalman_filter.hpp>
-#include <ema_filter.hpp>
-#include <trajectory.hpp>
-#include <tracker_status.hpp>
+#include <autoaim_predictor/kalman_filter.hpp>
+#include <autoaim_predictor/ema_filter.hpp>
+#include <autoaim_predictor/trajectory.hpp>
+#include <autoaim_predictor/tracker_status.hpp>
 
 struct Armor {
     explicit Armor(const tf2::Transform& armor_pose);
@@ -42,13 +43,14 @@ public:
     ) const;
     void print_colored_status_info() const;
     std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>> get_all_armors() const;
+    void write_predictor_status(hw_sentry_interfaces::msg::PredictorStatus& status) const;
 
     bool is_armor_switched_ = false; // 这次更新时装甲板是否切换了
     bool is_antispin_palstance_ = false; // 当前是否处于反陀螺角速度
 
 private:
     const unsigned ARMORS_COUNT = 4; // 车有4个装甲板
-    float INITIAL_RADIUS, SWITCH_ARMOR_ANGLE;
+    float INITIAL_RADIUS, SWITCH_ARMOR_ANGLE, DELTA_YAW_UPDATE_THRESHOLD;
     float ENTER_ANTISPIN_PALSTANCE, EXIT_ANTISPIN_PALSTANCE;
     float ANTISPIN_FOLLOW_ANGLE, ANTISPIN_SHOOT_ANGLE;
 
@@ -82,12 +84,13 @@ public:
     ) const;
     void print_colored_status_info() const;
     std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>> get_all_armors() const;
+    void write_predictor_status(hw_sentry_interfaces::msg::PredictorStatus& status) const;
 
     bool is_armor_switched_ = false; // 这次更新时装甲板是否切换了
 
 private:
     const unsigned ARMORS_COUNT = 3; // 前哨站有3个装甲板
-    float RADIUS, SWITCH_ARMOR_ANGLE;
+    float RADIUS, SWITCH_ARMOR_ANGLE, DELTA_YAW_UPDATE_THRESHOLD;
     float OUTPOST_FOLLOW_ANGLE, OUTPOST_CAN_SHOOT_ANGLE;
 
     float accumulated_yaw_; // 第一次看到的装甲板yaw角，作为观测量更新kf_rotation_angle
@@ -98,7 +101,7 @@ private:
 
 class ArmorTracker {
 public:
-    explicit ArmorTracker(const std::string& params_path);
+    explicit ArmorTracker(const cv::FileNode& fn);
 
     void set_target_label(ArmorType label);
     void push(const tf2::Transform& armor_pose);
@@ -114,6 +117,7 @@ public:
 
     void print_colored_status_info() const;
     std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>> get_all_armors() const;
+    void write_predictor_status(hw_sentry_interfaces::msg::PredictorStatus& status) const;
 
 private:
     void status_change_handler(StatusType from, StatusType to);

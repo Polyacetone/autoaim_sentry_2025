@@ -11,11 +11,12 @@
 #include <hw_sentry_interfaces/msg/poses.hpp>
 #include <hw_sentry_interfaces/msg/bullet_speed.hpp>
 #include <hw_sentry_interfaces/msg/shoot_pos.hpp>
+#include <hw_sentry_interfaces/msg/predictor_status.hpp>
 
 #include <autoaim_common_utils/tf_utils.hpp>
 #include <autoaim_common_utils/math_utils.hpp>
 #include <autoaim_common_definitions/common_definitions.hpp>
-#include <armor_tracker.hpp>
+#include <autoaim_predictor/armor_tracker.hpp>
 
 namespace autoaim_predictor {
 using namespace hw_sentry_interfaces::msg;
@@ -28,6 +29,8 @@ private:
     void poses_callback(const Poses::SharedPtr msg);
     std::tuple<Eigen::Vector3f, bool> predict_target(const rclcpp::Time& img_time) const;
     void send_shoot_pos(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, bool can_shoot) const;
+    void send_predictor_status(const std_msgs::msg::Header& header) const;
+    void send_visualization_marker(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, ArmorType label) const;
     std::vector<visualization_msgs::msg::Marker> construct_armor_markers(
         const rclcpp::Time& stamp,
         const std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>>& armors,
@@ -37,6 +40,8 @@ private:
         const rclcpp::Time& stamp,
         const Eigen::Vector3f position
     ) const;
+
+    AutoaimMode mode_ = AutoaimMode::NONE;
 
     bool enable_print_state_, enable_visualization_marker_;
     float bullet_speed_;
@@ -52,6 +57,7 @@ private:
     rclcpp::Subscription<BulletSpeed>::SharedPtr bullet_speed_sub_;
     rclcpp::Publisher<ShootPos>::SharedPtr shoot_pos_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr visualization_marker_pub_;
+    rclcpp::Publisher<PredictorStatus>::SharedPtr predictor_status_pub_;
 };
 
 PredictorNode::PredictorNode(const rclcpp::NodeOptions& options): Node("autoaim_predictor", options) {
@@ -61,10 +67,12 @@ PredictorNode::PredictorNode(const rclcpp::NodeOptions& options): Node("autoaim_
     std::string armor_tracker_params_path =
         ament_index_cpp::get_package_share_directory("autoaim_predictor")
         + "/config/armor_tracker_params.yaml";
-    armor_tracker_ = std::make_unique<ArmorTracker>(armor_tracker_params_path);
+    cv::FileStorage fs(armor_tracker_params_path, cv::FileStorage::READ);
+    armor_tracker_ = std::make_unique<ArmorTracker>(fs["armor_tracker"]);
 
     enable_print_state_ = declare_parameter<bool>("enable_print_state");
     enable_visualization_marker_ = declare_parameter<bool>("enable_visualization_marker");
+    mode_ = static_cast<AutoaimMode>(declare_parameter<int>("default_mode"));
     bullet_speed_ = declare_parameter<float>("bullet_speed");
     control_to_fire_time_ = declare_parameter<float>("control_to_fire_time");
     shoot_compensate_pitch_ = declare_parameter<float>("shoot_compensate_pitch");
@@ -73,6 +81,7 @@ PredictorNode::PredictorNode(const rclcpp::NodeOptions& options): Node("autoaim_
     std::string bullet_speed_topic = declare_parameter<std::string>("bullet_speed_topic");
     std::string shoot_pos_topic = declare_parameter<std::string>("shoot_pos_topic");
     std::string visualization_marker_topic = declare_parameter<std::string>("visualization_marker_topic");
+    std::string predictor_status_topic = declare_parameter<std::string>("predictor_status_topic");
     poses_sub_ = create_subscription<Poses>(
         poses_topic,
         rclcpp::QoS(1),
@@ -95,6 +104,10 @@ PredictorNode::PredictorNode(const rclcpp::NodeOptions& options): Node("autoaim_
         visualization_marker_topic,
         rclcpp::QoS(1)
     );
+    predictor_status_pub_ = create_publisher<PredictorStatus>(
+        predictor_status_topic,
+        rclcpp::QoS(1)
+    );
 }
 
 void PredictorNode::poses_callback(const Poses::SharedPtr msg) {
@@ -111,34 +124,29 @@ void PredictorNode::poses_callback(const Poses::SharedPtr msg) {
         current_basis_frame_id = msg->header.frame_id;
         armor_tracker_->reset();
     }
-
-    if (mode == AutoaimMode::ARMOR) {
-        armor_tracker_->set_target_label(static_cast<ArmorType>(msg->label));
+    if (mode_ != mode) {
+        mode_ = mode;
+        armor_tracker_->reset();
+    }
+    if (mode_ == AutoaimMode::ARMOR) {
+        const ArmorType label = static_cast<ArmorType>(msg->label);
+        armor_tracker_->set_target_label(label);
         for (const auto& armor_pose: msg->poses) {
             armor_tracker_->push(utils::convert_to<tf2::Transform>(armor_pose));
         }
         armor_tracker_->update(rclcpp::Time(msg->header.stamp).seconds());
+        send_predictor_status(msg->header);
         if (armor_tracker_->status() == StatusType::LOST) return;
-        if (enable_print_state_) {
-            armor_tracker_->print_colored_status_info();
-            std::cout << "(Basis frame id: " << current_basis_frame_id << ")" << std::endl;
-        }
         auto [target, can_shoot]= predict_target(msg->header.stamp);
         if (target != Eigen::Vector3f(0, 0, 0)) {
             send_shoot_pos(msg->header.stamp, target, can_shoot);
         }
+        if (enable_print_state_) {
+            armor_tracker_->print_colored_status_info();
+            std::cout << "(Basis frame id: " << current_basis_frame_id << ")" << std::endl;
+        }
         if (enable_visualization_marker_) {
-            visualization_msgs::msg::MarkerArray marker_arr;
-            marker_arr.markers = construct_armor_markers(
-                msg->header.stamp,
-                armor_tracker_->get_all_armors(),
-                static_cast<ArmorType>(msg->label
-            ));
-            marker_arr.markers.emplace_back(construct_target_point_marker(
-                msg->header.stamp,
-                target
-            ));
-            visualization_marker_pub_->publish(marker_arr);
+            send_visualization_marker(msg->header.stamp, target, label);
         }
     }
 }
@@ -221,6 +229,24 @@ void PredictorNode::send_shoot_pos(const rclcpp::Time& timestamp, const Eigen::V
     )) - shoot_compensate_pitch_;
     shoot_pos.yaw = utils::rad_period_correction(atan2(target.y(), target.x())) + shoot_compensate_yaw_;
     shoot_pos_pub_->publish(shoot_pos);
+}
+
+void PredictorNode::send_predictor_status(const std_msgs::msg::Header& header) const {
+    if (mode_ == AutoaimMode::ARMOR) {
+        PredictorStatus predictor_status;
+        predictor_status.header = header;
+        armor_tracker_->write_predictor_status(predictor_status);
+        predictor_status_pub_->publish(predictor_status);
+    }
+}
+
+void PredictorNode::send_visualization_marker(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, ArmorType label) const {
+    if (mode_ == AutoaimMode::ARMOR) {
+        visualization_msgs::msg::MarkerArray marker_arr;
+        marker_arr.markers = construct_armor_markers(timestamp,armor_tracker_->get_all_armors(), label);
+        marker_arr.markers.emplace_back(construct_target_point_marker(timestamp, target));
+        visualization_marker_pub_->publish(marker_arr);
+    }
 }
 
 std::vector<visualization_msgs::msg::Marker> PredictorNode::construct_armor_markers(

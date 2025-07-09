@@ -1,4 +1,4 @@
-#include <openvino_infer_engine.hpp>
+#include <autoaim_detector/openvino_infer_engine.hpp>
 
 OpenVINOInferEngine::OpenVINOInferEngine(
     const std::string& model_path,

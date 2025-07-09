@@ -1,0 +1,17 @@
+/**:
+  ros__parameters:
+    default_target_color: 0 # 没收到串口消息时的默认目标颜色，用于调试。0:blue, 1:red
+
+    emaf_center_filter_ratio: 0.8
+    max_temp_lost_frames: 10
+    max_converging_frames: 10
+    car_radius: 0.27
+
+    ### Subscribe topics
+    detections_topic: "autoaim/detector/detections"
+    camera_info_topic: "autoaim/camera/camera_info"
+    robot_color_topic: "serial/robot_color" # 根据自己的颜色判断目标颜色
+    predictor_status_topic: "autoaim/predictor/predictor_status" # 保证自瞄正在瞄的人一定会一直发出去
+
+    ### Publish topics
+    enemy_position_topic: "autoaim/send_enemy/enemy_position"

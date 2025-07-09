@@ -1,4 +1,4 @@
-#include <trajectory.hpp>
+#include <autoaim_predictor/trajectory.hpp>
 
 namespace trajectory {
 

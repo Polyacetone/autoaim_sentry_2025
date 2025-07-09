@@ -5,8 +5,12 @@ from launch.event_handlers import (OnExecutionComplete, OnProcessExit, OnProcess
 from launch.actions import RegisterEventHandler, LogInfo, OpaqueFunction, SetEnvironmentVariable
 from ament_index_python.packages import get_package_share_directory
 
-namespace = ''
-node_names = ['camera', 'detector', 'selector', 'locator', 'predictor']
+namespace = 'hw_sentry'
+node_names = ['camera', 'detector', 'selector', 'locator', 'predictor', 'send_enemy']
+
+def snake_to_camel(snake_str):
+    parts = snake_str.split('_')
+    return ''.join(word.capitalize() for word in parts)
 
 def launch_func(context, *args, **kwargs):
     composable_node_descriptions = []
@@ -15,7 +19,7 @@ def launch_func(context, *args, **kwargs):
         composable_node_descriptions.append(
             ComposableNode(
                 package=f'autoaim_{node_name}',
-                plugin=f'autoaim_{node_name}::{node_name.capitalize()}Node',
+                plugin=f'autoaim_{node_name}::{snake_to_camel(node_name)}Node',
                 name=f'autoaim_{node_name}',
                 parameters=[node_params_yaml],
                 extra_arguments=[{'use_intra_process_comms': True}]

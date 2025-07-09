@@ -1,4 +1,4 @@
-#include <tracker_status.hpp>
+#include <autoaim_predictor/tracker_status.hpp>
 
 TrackerStatus::TrackerStatus(
     const cv::FileNode& fn,
@@ -7,6 +7,19 @@ TrackerStatus::TrackerStatus(
 ): status_change_handler(status_change_handler), status_remain_handler(status_remain_handler) {
     MAX_TEMP_LOST_FRAMES = static_cast<int>(fn["max_temp_lost_frames"]);
     MAX_CONVERGING_FRAMES = static_cast<int>(fn["max_converging_frames"]);
+    reset();
+}
+
+TrackerStatus::TrackerStatus(
+    const unsigned max_temp_lost_frames,
+    const unsigned max_converging_frames,
+    std::function<void(StatusType from, StatusType to)> status_change_handler,
+    std::function<void(StatusType current)> status_remain_handler
+):
+    status_change_handler(status_change_handler),
+    status_remain_handler(status_remain_handler) {
+    MAX_TEMP_LOST_FRAMES = max_temp_lost_frames;
+    MAX_CONVERGING_FRAMES = max_converging_frames;
     reset();
 }
 
@@ -21,7 +34,7 @@ void TrackerStatus::set_next_status(StatusType status) {
     }
 }
 
-void TrackerStatus::reset() { set_next_status(StatusType::LOST); }
+void TrackerStatus::reset() { status_ = StatusType::LOST; current_status_frames_ = 0; }
 StatusType TrackerStatus::status() const { return status_; }
 
 void TrackerStatus::update(bool is_valid) {
