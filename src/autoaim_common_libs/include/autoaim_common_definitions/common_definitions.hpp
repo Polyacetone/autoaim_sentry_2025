@@ -9,7 +9,7 @@ enum class ArmorColor: int {
     GRAY = 2
 };
 
-enum class ArmorType: int {
+enum class ArmorLabel: int {
     NONE = -1,
     SENTRY = 0,
     ONE = 1,
@@ -29,19 +29,19 @@ enum class AutoaimMode: int {
 
 namespace defs {
 
-constexpr float armor_pitch(ArmorType t) {
-    if (t == ArmorType::NONE) [[unlikely]] throw std::invalid_argument("invalid armor type: NONE");
-    return (t == ArmorType::OUTPOST) ? -0.2618 : 0.2618;
+constexpr float armor_pitch(ArmorLabel t) {
+    if (t == ArmorLabel::NONE) [[unlikely]] throw std::invalid_argument("invalid armor type: NONE");
+    return (t == ArmorLabel::OUTPOST) ? -0.2618 : 0.2618;
 }
 
-constexpr bool is_armor_pitch_negative(ArmorType t) {
-    if (t == ArmorType::NONE) [[unlikely]] throw std::invalid_argument("invalid armor type: NONE");
+constexpr bool is_armor_pitch_negative(ArmorLabel t) {
+    if (t == ArmorLabel::NONE) [[unlikely]] throw std::invalid_argument("invalid armor type: NONE");
     return armor_pitch(t) < 0;
 }
 
-constexpr bool is_big_armor(ArmorType t) {
-    if (t == ArmorType::NONE) [[unlikely]] throw std::invalid_argument("invalid armor type: NONE");
-    return (t == ArmorType::ONE || t == ArmorType::BASE) ? true : false;
+constexpr bool is_big_armor(ArmorLabel t) {
+    if (t == ArmorLabel::NONE) [[unlikely]] throw std::invalid_argument("invalid armor type: NONE");
+    return (t == ArmorLabel::ONE || t == ArmorLabel::BASE) ? true : false;
 }
 
 }

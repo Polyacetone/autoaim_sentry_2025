@@ -4,8 +4,8 @@
 # 均采用国际单位制，距离为m，时间为s，角度为弧度
 
 armor_tracker:
-  approximate_framerate: 50
-  err_queue_size: 200
+  approximate_framerate: 100
+  err_queue_size: 80
   avg_err_threshold: 0.1
   
   kf_main_observing_armor:

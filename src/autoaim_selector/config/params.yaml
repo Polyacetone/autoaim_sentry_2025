@@ -1,8 +1,15 @@
 /**:
   ros__parameters:
-    default_mode: 0 # 没收到决策消息时的默认模式，用于调试。-1:null, 0:armor, 1:buff, 2:dart
-    default_target_label: 0 # 没收到决策消息时的默认目标编号，用于调试。0:sentry, 1:1, 2:2, 3:3, 4:4, 5:outpost, 6:base
-    default_target_color: 0 # 没收到串口消息时的默认目标颜色，用于调试。0:blue, 1:red
+    # 没收到决策消息时的默认模式，决策死掉也会回到该模式。-1:null, 0:armor, 1:buff, 2:dart
+    default_mode: 0
+    # 没收到决策消息时的默认目标优先级，决策死掉也会回到该优先级。:sentry, 1:1, 2:2, 3:3, 4:4, 5:outpost, 6:base
+    default_target_label_priority: [0, 1, 2, 3, 4, 5]
+    # 没收到串口消息时的默认目标颜色，用于调试。0:blue, 1:red
+    default_target_color: 0
+
+    decision_fallback_timeout: 1.0 # 多长时间没收到决策消息就切换回默认模式
+    current_target_max_lost_frames: 10 # 当前目标最多丢失多少帧直到清除
+    switch_new_target_appear_frames: 5 # 新的优先目标出现多少帧才会切换目标
 
     big_armor_length_height_threshold: 2.4
     small_armor_length_height_threshold: 1.4
@@ -11,6 +18,7 @@
     detections_topic: "autoaim/detector/detections"
     robot_color_topic: "serial/robot_color" # 根据自己的颜色判断击打目标颜色
     target_enemy_topic: "decision/target_enemy" # 从决策接收，指定打人的优先级
+    comp_robots_hp_topic: "rfr/comp_robots_hp"
 
     ### Publish topics
     selected_detection_topic: "autoaim/selector/detections"

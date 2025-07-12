@@ -4,7 +4,7 @@ tf2::Transform PnPSolver::solve_pnp(
     const hw_sentry_interfaces::msg::ArmorDetection& detection,
     const std::tuple<float, float, float>& gimbal_ypr
 ) const {
-    const ArmorType label = static_cast<ArmorType>(detection.label);
+    const ArmorLabel label = static_cast<ArmorLabel>(detection.label);
     const auto& obj_pts = defs::is_big_armor(label) ? BIG_POINTS : SMALL_POINTS;
     const std::array<cv::Point2f, 4> img_pts {
         cv::Point2f {detection.tl.x, detection.tl.y},

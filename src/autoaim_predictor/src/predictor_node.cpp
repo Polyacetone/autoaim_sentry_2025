@@ -30,11 +30,11 @@ private:
     std::tuple<Eigen::Vector3f, bool> predict_target(const rclcpp::Time& img_time) const;
     void send_shoot_pos(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, bool can_shoot) const;
     void send_predictor_status(const std_msgs::msg::Header& header) const;
-    void send_visualization_marker(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, ArmorType label) const;
+    void send_visualization_marker(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, ArmorLabel label) const;
     std::vector<visualization_msgs::msg::Marker> construct_armor_markers(
         const rclcpp::Time& stamp,
         const std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>>& armors,
-        const ArmorType label
+        const ArmorLabel label
     ) const;
     visualization_msgs::msg::Marker construct_target_point_marker(
         const rclcpp::Time& stamp,
@@ -129,7 +129,7 @@ void PredictorNode::poses_callback(const Poses::SharedPtr msg) {
         armor_tracker_->reset();
     }
     if (mode_ == AutoaimMode::ARMOR) {
-        const ArmorType label = static_cast<ArmorType>(msg->label);
+        const ArmorLabel label = static_cast<ArmorLabel>(msg->label);
         armor_tracker_->set_target_label(label);
         for (const auto& armor_pose: msg->poses) {
             armor_tracker_->push(utils::convert_to<tf2::Transform>(armor_pose));
@@ -240,7 +240,7 @@ void PredictorNode::send_predictor_status(const std_msgs::msg::Header& header) c
     }
 }
 
-void PredictorNode::send_visualization_marker(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, ArmorType label) const {
+void PredictorNode::send_visualization_marker(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, ArmorLabel label) const {
     if (mode_ == AutoaimMode::ARMOR) {
         visualization_msgs::msg::MarkerArray marker_arr;
         marker_arr.markers = construct_armor_markers(timestamp,armor_tracker_->get_all_armors(), label);
@@ -252,7 +252,7 @@ void PredictorNode::send_visualization_marker(const rclcpp::Time& timestamp, con
 std::vector<visualization_msgs::msg::Marker> PredictorNode::construct_armor_markers(
     const rclcpp::Time& stamp,
     const std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>>& armors,
-    const ArmorType label
+    const ArmorLabel label
 ) const {
     std::vector<visualization_msgs::msg::Marker> markers;
     for (unsigned i = 0; i < armors.size(); i++) {

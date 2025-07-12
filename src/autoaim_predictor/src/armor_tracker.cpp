@@ -654,7 +654,7 @@ ArmorTracker::ArmorTracker(const cv::FileNode& fn) {
 }
 
 StatusType ArmorTracker::status() const {
-    if (target_label_ == ArmorType::OUTPOST) {
+    if (target_label_ == ArmorLabel::OUTPOST) {
         return outpost_status_->status();
     } else {
         return car_status_->status();
@@ -678,7 +678,7 @@ void ArmorTracker::reset() {
     kf_armor_avg_err_ = car_avg_err_ = 0;
 }
 
-void ArmorTracker::set_target_label(ArmorType label) {
+void ArmorTracker::set_target_label(ArmorLabel label) {
     if (target_label_ != label) {
         reset();
         target_label_ = label;
@@ -689,7 +689,7 @@ void ArmorTracker::update(const double timestamp) {
     current_update_time_ = timestamp;
     bool is_valid = (pushed_armors_.size() == 1 || pushed_armors_.size() == 2);
     // 更新状态机，状态机会根据状态调用跟踪器的更新
-    if (target_label_ == ArmorType::OUTPOST) outpost_status_->update(is_valid);
+    if (target_label_ == ArmorLabel::OUTPOST) outpost_status_->update(is_valid);
     else car_status_->update(is_valid);
     // 统计单独装甲板预测以及整车预测的历史误差
     if (is_valid) update_pred_accuracy();
@@ -700,7 +700,7 @@ void ArmorTracker::update(const double timestamp) {
 void ArmorTracker::status_change_handler(StatusType from, StatusType to) {
     if (from == StatusType::LOST && to == StatusType::CONVERGING) { // 初始化
         kf_main_observing_armor_->initialize(pushed_armors_[0].translation);
-        if (target_label_ == ArmorType::OUTPOST) {
+        if (target_label_ == ArmorLabel::OUTPOST) {
             outpost_observer_->initialize(pushed_armors_);
         } else {
             car_observer_->initialize(pushed_armors_);
@@ -712,14 +712,14 @@ void ArmorTracker::status_remain_handler(StatusType current) {
     if (current != StatusType::LOST) { // 预测
         const float time_elapsed = static_cast<float>(current_update_time_ - prev_update_time_);
         kf_main_observing_armor_->predict(time_elapsed);
-        if (target_label_ == ArmorType::OUTPOST) {
+        if (target_label_ == ArmorLabel::OUTPOST) {
             outpost_observer_->predict(time_elapsed);
         } else {
             car_observer_->predict(time_elapsed);
         }
     }
     if (current == StatusType::CONVERGING || current == StatusType::TRACKING) { // 更新
-        if (target_label_ == ArmorType::OUTPOST) {
+        if (target_label_ == ArmorLabel::OUTPOST) {
             outpost_observer_->update(pushed_armors_);
         } else {
             car_observer_->update(pushed_armors_);
@@ -820,7 +820,7 @@ std::tuple<Vector3f, bool> ArmorTracker::predict_shoot_pos(
     const Vector3f fric_to_basis,
     const float gimbal_yaw_to_basis
 ) {
-    if (target_label_ == ArmorType::OUTPOST) {
+    if (target_label_ == ArmorLabel::OUTPOST) {
         const float img_to_hit_time =
             outpost_observer_->predict_img_to_hit_time(bullet_speed, img_to_fire_time, fric_to_basis);
         return outpost_observer_->predict_shoot_pos(gimbal_yaw_to_basis, img_to_hit_time);
@@ -856,7 +856,7 @@ void ArmorTracker::print_colored_status_info() const {
     const auto print_vec = [](const char* format, Vector3f vec) {
         std::printf(format, vec.x(), vec.y(), vec.z());
     };
-    if (target_label_ == ArmorType::OUTPOST) {
+    if (target_label_ == ArmorLabel::OUTPOST) {
         outpost_status_->print_colored_status_info();
     } else {
         car_status_->print_colored_status_info();
@@ -864,12 +864,12 @@ void ArmorTracker::print_colored_status_info() const {
     std::cout << termcolor::bold << "MainArmor   " << termcolor::reset;
     print_vec("[% 4.0f, % 4.0f, % 4.0f] += ", kf_main_observing_armor_->value() * 100);
     print_vec("[% 4.0f, % 4.0f, % 4.0f]\n", kf_main_observing_armor_->derivative() * 100);
-    if (target_label_ == ArmorType::OUTPOST) {
+    if (target_label_ == ArmorLabel::OUTPOST) {
         outpost_observer_->print_colored_status_info();
     } else {
         car_observer_->print_colored_status_info();
     }
-    if (target_label_ != ArmorType::OUTPOST) {
+    if (target_label_ != ArmorLabel::OUTPOST) {
         std::cout << termcolor::bold << "MainArmorAvgErr " << termcolor::reset;
         std::printf("%4.1f", kf_armor_avg_err_ * 100);
         std::cout << std::endl;
@@ -883,7 +883,7 @@ void ArmorTracker::print_colored_status_info() const {
 }
 
 std::vector<std::tuple<Vector3f, Quaternionf>> ArmorTracker::get_all_armors() const {
-    if (target_label_ == ArmorType::OUTPOST) {
+    if (target_label_ == ArmorLabel::OUTPOST) {
         return outpost_observer_->get_all_armors();
     } else {
         return car_observer_->get_all_armors();
@@ -893,7 +893,7 @@ std::vector<std::tuple<Vector3f, Quaternionf>> ArmorTracker::get_all_armors() co
 void ArmorTracker::write_predictor_status(hw_sentry_interfaces::msg::PredictorStatus& status) const {
     status.mode = static_cast<int>(AutoaimMode::ARMOR);
     status.label = static_cast<int>(target_label_);
-    if (target_label_ == ArmorType::OUTPOST) {
+    if (target_label_ == ArmorLabel::OUTPOST) {
         status.tracker_status = static_cast<int>(outpost_status_->status());
         outpost_observer_->write_predictor_status(status);
     } else {

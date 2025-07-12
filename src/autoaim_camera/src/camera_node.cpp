@@ -1,4 +1,3 @@
-#include <execution>
 #include <rclcpp/rclcpp.hpp>
 #include <opencv2/opencv.hpp>
 #include <MvCameraControl.h>
@@ -144,7 +143,6 @@ void CameraNode::capture_thread() {
             CV_8UC3
         );
         std::copy(
-            std::execution::par_unseq,
             out_frame.pBufAddr,
             out_frame.pBufAddr + out_frame.stFrameInfo.nFrameLen + 1,
             capture_frame.data
@@ -160,7 +158,6 @@ void CameraNode::capture_thread() {
         image_msg.step = image_msg.width * 3;
         image_msg.data.resize(image_msg.width * image_msg.height * 3);
         std::copy(
-            std::execution::par_unseq,
             resized_img.data,
             resized_img.data + image_msg.data.size() + 1,
             image_msg.data.data()
@@ -251,13 +248,12 @@ void CameraNode::start_grabbing() const {
 
 rclcpp::Time CameraNode::get_corresponding_imu_timestamp(const rclcpp::Time& img_time) const {
     auto iter = std::find_if(
-        imu_timestamp_buffer_.begin(),
-        imu_timestamp_buffer_.end(),
+        imu_timestamp_buffer_.begin(), imu_timestamp_buffer_.end(),
         [&](const auto& imu_timestamp) -> bool {
             const double diff = to_sec(img_time) - to_sec(imu_timestamp);
-            // 相机传输线带宽约3000Mbps，所以大概需要8ms才能把图像传过来。相机处理时间大概是2ms的数量级
-            // offset = 曝光时间 + 图像处理时间 + 图像传输时间 - 串口传输时间
-            const double offset = 8e-3 + 2e-3 + exposure_ / 1e6;
+            // offset = 曝光时间 + 相机处理时间 + 图像传输时间 - 串口传输时间
+            // 相机传输线带宽约3000Mbps，所以大概需要8ms才能把图像传过来。相机处理时间减去串口传输时间大概是1ms左右
+            const double offset = exposure_ / 1e6 + 9e-3;
             return offset - 2e-3 < diff && diff < offset + 2e-3;
         }
     );
@@ -265,12 +261,12 @@ rclcpp::Time CameraNode::get_corresponding_imu_timestamp(const rclcpp::Time& img
     if (imu_timestamp_buffer_.empty()) {
         RCLCPP_WARN(
             get_logger(),
-            "Failed to synchronize current image timestamp with imu timestamp: empty imu timestamp buffer"
+            "Failed to synchronize image timestamp with imu timestamp: empty imu timestamp buffer"
         );
     } else {
         RCLCPP_WARN(
             get_logger(), 
-            "Failed to synchronize current image timestamp with imu timestamp: newest timestamp diff: %8.4lf",
+            "Failed to synchronize image timestamp with imu timestamp: newest timestamp diff: %6.4lf",
             to_sec(img_time) - to_sec(imu_timestamp_buffer_[0])
         );
     }

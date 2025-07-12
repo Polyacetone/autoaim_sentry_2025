@@ -103,7 +103,7 @@ class ArmorTracker {
 public:
     explicit ArmorTracker(const cv::FileNode& fn);
 
-    void set_target_label(ArmorType label);
+    void set_target_label(ArmorLabel label);
     void push(const tf2::Transform& armor_pose);
     void update(const double timestamp);
     void reset();
@@ -129,7 +129,7 @@ private:
     unsigned ERR_QUEUE_SIZE, APPROXIMATE_FRAMERATE;
     float AVG_ERR_THRESHOLD;
     
-    ArmorType target_label_;
+    ArmorLabel target_label_;
     std::vector<Armor> pushed_armors_;
     double prev_update_time_, current_update_time_;
 
