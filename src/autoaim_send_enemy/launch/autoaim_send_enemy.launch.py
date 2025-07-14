@@ -9,9 +9,10 @@ import os
 def generate_launch_description():
     config_yaml = os.path.join(get_package_share_directory('autoaim_send_enemy'), 'config', 'params.yaml')
     return LaunchDescription([
-    Node(
-        package="autoaim_send_enemy",
-        executable="autoaim_send_enemy_node",
-        output="screen",
-        parameters=[config_yaml],
-    )])
+        Node(
+            package="autoaim_send_enemy",
+            executable="autoaim_send_enemy_node",
+            output="screen",
+            parameters=[config_yaml],
+        )
+    ])

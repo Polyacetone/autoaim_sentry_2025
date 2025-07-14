@@ -11,8 +11,8 @@
     current_target_max_lost_frames: 10 # 当前目标最多丢失多少帧直到清除
     switch_new_target_appear_frames: 5 # 新的优先目标出现多少帧才会切换目标
 
-    big_armor_length_height_threshold: 2.4
-    small_armor_length_height_threshold: 1.4
+    big_armor_length_height_threshold: 2.2
+    small_armor_length_height_threshold: 1.2
 
     ### Subscribe topics
     detections_topic: "autoaim/detector/detections"

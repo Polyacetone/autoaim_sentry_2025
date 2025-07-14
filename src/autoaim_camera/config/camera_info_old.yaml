@@ -1,6 +1,6 @@
 image_width: 640
 image_height: 384
-camera_name: autoaim_sentry
+camera_name: autoaim_sentry_old
 camera_matrix:
   rows: 3
   cols: 3

@@ -1,15 +1,15 @@
 /**:
   ros__parameters:
     enable_fps: false # 是否显示相机帧率
-    enable_imu_trigger: true # 是否启用硬触发
+    enable_imu_trigger: false # 是否启用硬触发
     
-    camera_name: "autoaim_sentry" # 相机的名称，可以在MVS里面设定
+    camera_name: "autoaim_sentry_new" # 相机的名称，可以在MVS里面设定
     frame_rate: 100.0 # 帧率仅在连续触发模式生效
     exposure: 2000.0
     gamma: 0.6
     gain: 16.0
 
-    camera_info_url: "package://autoaim_camera/config/camera_info_old.yaml" # 相机参数的url
+    camera_info_url: "package://autoaim_camera/config/camera_info_new.yaml" # 相机参数的url
 
     ### Subscribe topics
     imu_timestamp_topic: "serial/gimbal_joint_state" # 启用hard_trigger时接收，用于同步串口（imu）时间戳和图像时间戳

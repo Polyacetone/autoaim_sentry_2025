@@ -220,14 +220,16 @@ void SelectorNode::select_armors(
         dst.push_back(filtered[0]);
     } else {
         // 根据击打面积和装甲板位置与正在瞄准位置间的差异排序
-        std::sort(filtered.begin(), filtered.end(), [&](const ArmorDetection& a, const ArmorDetection& b) {
-            if (center_x_prev == 0) {
-                return get_area(a) > get_area(b);
-            } else {
-                return get_area(a) - abs(get_center_x(a) - center_x_prev)
-                    > get_area(b) - abs(get_center_x(b) - center_x_prev);
+        std::sort(filtered.begin(), filtered.end(), 
+            [&](const ArmorDetection& a, const ArmorDetection& b) {
+                if (center_x_prev == 0) {
+                    return get_area(a) > get_area(b);
+                } else {
+                    return get_area(a) - abs(get_center_x(a) - center_x_prev)
+                        > get_area(b) - abs(get_center_x(b) - center_x_prev);
+                }
             }
-        });
+        );
         dst.emplace_back(filtered[0]);
         // 接下来选择击打面积次之，且和原来那个位置有较大差异的装甲板。
         // 虽然理论上detection中的nms已经能去除同一个装甲板的多个识别结果，但有时候还是会出现。

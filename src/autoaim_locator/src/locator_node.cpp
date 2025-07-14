@@ -125,13 +125,14 @@ Poses LocatorNode::solve_armor_detections(const Detections::SharedPtr msg) {
 
     auto gimbal_to_basis = chassis_to_basis * gimbal_to_chassis;
     auto gimbal_ypr = utils::to_euler_ypr(gimbal_to_basis.getRotation());
-    
-    for (const auto& detection: msg->armor_detections) {
-        auto armor_to_cam = pnp_solver_->solve_pnp(detection, gimbal_ypr);
-        auto armor_to_basis = chassis_to_basis * cam_to_chassis * armor_to_cam;
-        auto armor_pose = utils::convert_to<geometry_msgs::msg::Pose>(armor_to_basis);
-        poses.poses.emplace_back(armor_pose);
-    }
+    auto armors_to_cam = pnp_solver_->solve_pnp(msg->armor_detections, gimbal_ypr);
+    std::transform(armors_to_cam.begin(), armors_to_cam.end(), std::back_inserter(poses.poses),
+        [&](const auto& armor_to_cam) {
+            auto armor_to_basis = chassis_to_basis * cam_to_chassis * armor_to_cam;
+            return utils::convert_to<geometry_msgs::msg::Pose>(armor_to_basis);
+        }
+    );
+
     return poses;
 }
 

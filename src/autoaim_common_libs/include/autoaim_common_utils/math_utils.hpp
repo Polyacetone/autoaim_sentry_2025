@@ -34,4 +34,17 @@ static constexpr double get_angle(const Eigen::VectorXd& vec1, const Eigen::Vect
     return std::acos(cosval);
 }
 
+// 四元数转ypr欧拉角
+static constexpr std::tuple<float, float, float> to_euler_ypr(const tf2::Quaternion& quat) {
+    double yaw, pitch, roll;
+    tf2::Matrix3x3 rot_mat(quat);
+    rot_mat.getEulerYPR(yaw, pitch, roll);
+    return {yaw, pitch, roll};
+}
+
+// 四元数转ypr欧拉角
+static constexpr std::tuple<float, float, float> to_euler_ypr(const Eigen::Quaternionf& quat) {
+    return to_euler_ypr(utils::convert_to<tf2::Quaternion>(quat));
+}
+
 } // namespace math_utils

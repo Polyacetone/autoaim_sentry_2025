@@ -204,13 +204,13 @@ Eigen::Vector3f SendEnemyNode::calc_center(
 
     auto gimbal_to_map = chassis_to_map * gimbal_to_chassis;
     auto gimbal_ypr = utils::to_euler_ypr(gimbal_to_map.getRotation());
-    
+    auto armors_to_cam = pnp_solver_->solve_pnp(detections, gimbal_ypr);
+
     const int armors_cnt = detections.size();
     Eigen::Vector3f center(0, 0, 0);
     std::for_each(
-        detections.begin(), detections.end(),
-        [&](const auto& detection) {
-            auto armor_to_cam = pnp_solver_->solve_pnp(detection, gimbal_ypr);
+        armors_to_cam.begin(), armors_to_cam.end(),
+        [&](const auto& armor_to_cam) {
             auto armor_to_map = chassis_to_map * cam_to_chassis * armor_to_cam;
             Armor armor(armor_to_map);
             center += (armor.translation + car_radius_ * armor.rotated_x) / armors_cnt;

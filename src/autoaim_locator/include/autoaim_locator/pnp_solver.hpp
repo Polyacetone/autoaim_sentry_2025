@@ -24,12 +24,38 @@ public:
     */
     void set_cam_matrix(const cv::Mat intrinsic, const cv::Mat distortion);
 
-    tf2::Transform solve_pnp(
-        const hw_sentry_interfaces::msg::ArmorDetection& detection,
+    std::vector<tf2::Transform> solve_pnp(
+        const std::vector<hw_sentry_interfaces::msg::ArmorDetection>& detections,
         const std::tuple<float, float, float>& gimbal_ypr
     ) const;
 
 private:
+    void solve_pnp_cv(
+        const std::vector<hw_sentry_interfaces::msg::ArmorDetection>& detections,
+        std::vector<std::array<cv::Mat, 2>>& rvecs,
+        std::vector<std::array<cv::Mat, 2>>& tvecs,
+        std::vector<std::array<float, 2>>& reprojerrs
+    ) const;
+
+    void cvcoord_to_tfcoord(
+        const std::vector<std::array<cv::Mat, 2>>& rvecs,
+        const std::vector<std::array<cv::Mat, 2>>& tvecs,
+        std::vector<std::array<Eigen::Quaternionf, 2>>& rotations,
+        std::vector<std::array<Eigen::Vector3f, 2>>& translations
+    ) const;
+
+    int select_solution_prior_angle(
+        const std::array<Eigen::Quaternionf, 2>& rotations,
+        const std::array<float, 2>& reprojerrs,
+        const std::tuple<float, float, float>& gimbal_ypr,
+        const float prior_pitch
+    ) const;
+
+    std::array<int, 2> select_solution_armors_relative_position(
+        const std::array<std::array<Eigen::Quaternionf, 2>, 2>& rotations,
+        const std::array<std::array<Eigen::Vector3f, 2>, 2>& translations
+    ) const;
+
     static constexpr float DETECTOR_ERROR_PIXEL_BY_SLOPE = 2.0f;
 
     // 单位: 米

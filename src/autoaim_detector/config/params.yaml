@@ -4,7 +4,7 @@
     enable_labeled_image: true
     default_mode: 0 # 没收到决策消息时的默认模式，决策死掉也会回到该模式。-1:null, 0:armor, 1:buff, 2:dart
 
-    model_path: "20250519v11.xml"
+    model_path: "20250429v11.xml"
     device_name: "NPU"
     confidence_threshold: 0.4
     nms_threshold: 0.4

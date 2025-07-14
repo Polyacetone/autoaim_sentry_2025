@@ -9,9 +9,10 @@ import os
 def generate_launch_description():
     config_yaml = os.path.join(get_package_share_directory('autoaim_selector'), 'config', 'params.yaml')
     return LaunchDescription([
-    Node(
-        package="autoaim_selector",
-        executable="autoaim_selector_node",
-        output="screen",
-        parameters=[config_yaml],
-    )])
+        Node(
+            package="autoaim_selector",
+            executable="autoaim_selector_node",
+            output="screen",
+            parameters=[config_yaml],
+        )
+    ])
