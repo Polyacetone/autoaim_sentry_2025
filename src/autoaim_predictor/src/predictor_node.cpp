@@ -91,7 +91,7 @@ PredictorNode::PredictorNode(const rclcpp::NodeOptions& options): Node("autoaim_
         bullet_speed_topic,
         rclcpp::QoS(1),
         [&](const BulletSpeed::SharedPtr msg) {
-            if (22.5 <= msg->bullet_speed && msg->bullet_speed <= 24.5) {
+            if (21 <= msg->bullet_speed && msg->bullet_speed <= 25) {
                 bullet_speed_ = 0.5 * msg->bullet_speed + 0.5 * bullet_speed_;
             }
         }
@@ -132,7 +132,10 @@ void PredictorNode::poses_callback(const Poses::SharedPtr msg) {
         const ArmorLabel label = static_cast<ArmorLabel>(msg->label);
         armor_tracker_->set_target_label(label);
         for (const auto& armor_pose: msg->poses) {
-            armor_tracker_->push(utils::convert_to<tf2::Transform>(armor_pose));
+            armor_tracker_->push(Armor(
+                utils::convert_to<tf2::Transform>(armor_pose),
+                defs::armor_pitch(label)
+            ));
         }
         armor_tracker_->update(rclcpp::Time(msg->header.stamp).seconds());
         send_predictor_status(msg->header);

@@ -6,6 +6,10 @@ std::vector<tf2::Transform> PnPSolver::solve_pnp(
     const double timestamp,
     const std::shared_ptr<LSTMPoseSmoothing> lstm
 ) {
+    if (detections.size() != 1 && detections.size() != 2) {
+        return {};
+    }
+
     std::vector<std::array<cv::Mat, 2>> rvecs;
     std::vector<std::array<cv::Mat, 2>> tvecs;
     std::vector<std::array<float, 2>> reprojerrs;
@@ -117,7 +121,6 @@ int PnPSolver::select_solution_lstm(
     const auto yaw0 = std::get<0>(utils::to_euler_ypr(rotations[0]));
     const auto yaw1 = std::get<0>(utils::to_euler_ypr(rotations[1]));
     const float result = lstm->infer(yaw0, yaw1, reprojerrs[0], reprojerrs[1], dt);
-    std::cout << utils::r2d(result) << std::endl;
     const float diff0 = std::abs(result - yaw0);
     const float diff1 = std::abs(result - yaw1);
     return diff0 > diff1;

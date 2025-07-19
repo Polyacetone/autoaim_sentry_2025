@@ -16,12 +16,16 @@
 #include <autoaim_predictor/tracker_status.hpp>
 
 struct Armor {
-    explicit Armor(const tf2::Transform& armor_pose);
-    explicit Armor(const Eigen::Vector3f& translation, const Eigen::Quaternionf& rotation);
+    explicit Armor(const tf2::Transform& armor_pose, const float pitch_to_basis);
+    explicit Armor(
+        const Eigen::Vector3f& translation,
+        const Eigen::Quaternionf& rotation,
+        const float pitch_to_basis
+    );
 
     Eigen::Vector3f translation; // 直接从tf中拿来的位移
     Eigen::Quaternionf rotation; // 直接从tf中拿来的旋转
-    Eigen::Vector3f rotated_x, rotated_y, rotated_z; // 绕着原y轴转15度后的各个方向向量
+    Eigen::Vector3f rotated_x, rotated_y, rotated_z; // 转掉pitch后的各个方向向量
     float yaw; // 法向量在xy平面上投影与x轴的夹角
 };
 
@@ -104,7 +108,7 @@ public:
     explicit ArmorTracker(const cv::FileNode& fn);
 
     void set_target_label(ArmorLabel label);
-    void push(const tf2::Transform& armor_pose);
+    void push(const Armor& armor);
     void update(const double timestamp);
     void reset();
     StatusType status() const;

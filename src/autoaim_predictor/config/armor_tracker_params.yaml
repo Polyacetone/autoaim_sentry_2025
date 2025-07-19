@@ -78,7 +78,7 @@ armor_tracker:
         data: [ 1e-3 ]
 
   outpost_observer:
-    radius: 0.275
+    radius: 0.25
     switch_armor_angle: 1.0
     delta_yaw_update_threshold: 0.2
     outpost_follow_angle: 0.7

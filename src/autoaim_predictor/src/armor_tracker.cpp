@@ -119,17 +119,18 @@ float calc_img_to_hit_time(
 **********************************    Armor    ************************************
 ***********************************************************************************/
 
-Armor::Armor(const tf2::Transform& armor_pose): Armor(
+Armor::Armor(const tf2::Transform& armor_pose, const float pitch_to_basis): Armor(
     utils::convert_to<Vector3f>(armor_pose.getOrigin()),
-    utils::convert_to<Quaternionf>(armor_pose.getRotation())
+    utils::convert_to<Quaternionf>(armor_pose.getRotation()),
+    pitch_to_basis
 ) {}
 
-Armor::Armor(const Vector3f& translation, const Quaternionf& rotation):
+Armor::Armor(const Vector3f& translation, const Quaternionf& rotation, const float pitch_to_basis):
     translation(translation) {
     Vector3f original_x = rotation * Vector3f::UnitX();
     Vector3f original_y = rotation * Vector3f::UnitY();
     Vector3f original_z = rotation * Vector3f::UnitZ();
-    AngleAxisf pitch_correction(utils::d2r(-15), original_y.normalized());
+    AngleAxisf pitch_correction(-pitch_to_basis, original_y.normalized());
     rotated_x = pitch_correction * original_x;
     rotated_y = pitch_correction * original_y;
     rotated_z = pitch_correction * original_z;
@@ -660,8 +661,9 @@ StatusType ArmorTracker::status() const {
         return car_status_->status();
     }
 }
-void ArmorTracker::push(const tf2::Transform& armor_pose) {
-    pushed_armors_.emplace_back(armor_pose);
+
+void ArmorTracker::push(const Armor& armor) {
+    pushed_armors_.emplace_back(armor);
 }
 
 void ArmorTracker::reset() {

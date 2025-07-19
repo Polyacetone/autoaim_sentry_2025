@@ -29,7 +29,11 @@ private:
     void camera_info_callback(const CameraInfo::SharedPtr msg);
     void detections_callback(const Detections::SharedPtr msg);
     void predictor_status_callback(const PredictorStatus::SharedPtr msg);
-    Eigen::Vector3f calc_center(const rclcpp::Time& time, const std::vector<ArmorDetection>& detections) const;
+    Eigen::Vector3f calc_center(
+        const rclcpp::Time& time,
+        const std::vector<ArmorDetection>& detections,
+        const ArmorLabel label
+    ) const;
 
     float car_radius_;
 
@@ -119,7 +123,7 @@ void SendEnemyNode::detections_callback(const Detections::SharedPtr msg) {
         const ArmorLabel label = static_cast<ArmorLabel>(i);
         // 更新状态机和惯性滤波器
         if (map[label].size() == 1 || map[label].size() == 2) {
-            Eigen::Vector3f center = calc_center(msg->header.stamp, map[label]);
+            Eigen::Vector3f center = calc_center(msg->header.stamp, map[label], label);
             if (center == Eigen::Vector3f(0, 0, 0)) continue;
             if (car_status_[static_cast<int>(label)]->status() == StatusType::LOST) {
                 emaf_center_[static_cast<int>(label)]->initialize(center);
@@ -164,7 +168,8 @@ void SendEnemyNode::predictor_status_callback(const PredictorStatus::SharedPtr m
 
 Eigen::Vector3f SendEnemyNode::calc_center(
     const rclcpp::Time& time,
-    const std::vector<ArmorDetection>& detections
+    const std::vector<ArmorDetection>& detections,
+    const ArmorLabel label
 ) const {
     tf2::Transform cam_to_chassis;
     if (!utils::try_lookup_tf(
@@ -212,7 +217,7 @@ Eigen::Vector3f SendEnemyNode::calc_center(
         armors_to_cam.begin(), armors_to_cam.end(),
         [&](const auto& armor_to_cam) {
             auto armor_to_map = chassis_to_map * cam_to_chassis * armor_to_cam;
-            Armor armor(armor_to_map);
+            Armor armor(armor_to_map, defs::armor_pitch(label));
             center += (armor.translation + car_radius_ * armor.rotated_x) / armors_cnt;
         }
     );
