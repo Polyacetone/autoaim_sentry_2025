@@ -6,12 +6,14 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2_ros/transform_listener.h>
+#include <ament_index_cpp/get_package_share_directory.hpp>
 
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <hw_sentry_interfaces/msg/detections.hpp>
 #include <hw_sentry_interfaces/msg/poses.hpp>
 
 #include <autoaim_locator/pnp_solver.hpp>
+#include <autoaim_locator/lstm_pose_smoothing.hpp>
 #include <autoaim_common_utils/tf_utils.hpp>
 #include <autoaim_common_utils/convert_utils.hpp>
 
@@ -30,6 +32,8 @@ private:
     Poses solve_armor_detections(const Detections::SharedPtr msg);
 
     std::unique_ptr<PnPSolver> pnp_solver_;
+    std::shared_ptr<LSTMPoseSmoothing> lstm_pose_smoothing_ = nullptr;
+
     std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -45,6 +49,14 @@ LocatorNode::LocatorNode(const rclcpp::NodeOptions& options): Node("autoaim_loca
     tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
     pnp_solver_ = std::make_unique<PnPSolver>();
     
+    bool enable_lstm_smoothing = declare_parameter<bool>("enable_lstm_smoothing");
+    if (enable_lstm_smoothing) {
+        std::string model_name = declare_parameter<std::string>("lstm_smoothing_model");
+        std::string model_path = ament_index_cpp::get_package_share_directory("autoaim_locator")
+            + "/model/" + model_name;
+        lstm_pose_smoothing_ = std::make_shared<LSTMPoseSmoothing>(model_path);
+    }
+
     std::string camera_info_topic = declare_parameter<std::string>("camera_info_topic");
     std::string selected_detections_topic = declare_parameter<std::string>("selected_detections_topic");
     std::string poses_topic = declare_parameter<std::string>("poses_topic");
@@ -125,7 +137,12 @@ Poses LocatorNode::solve_armor_detections(const Detections::SharedPtr msg) {
 
     auto gimbal_to_basis = chassis_to_basis * gimbal_to_chassis;
     auto gimbal_ypr = utils::to_euler_ypr(gimbal_to_basis.getRotation());
-    auto armors_to_cam = pnp_solver_->solve_pnp(msg->armor_detections, gimbal_ypr);
+    auto armors_to_cam = pnp_solver_->solve_pnp(
+        msg->armor_detections,
+        gimbal_ypr,
+        rclcpp::Time(msg->header.stamp).seconds(),
+        lstm_pose_smoothing_
+    );
     std::transform(armors_to_cam.begin(), armors_to_cam.end(), std::back_inserter(poses.poses),
         [&](const auto& armor_to_cam) {
             auto armor_to_basis = chassis_to_basis * cam_to_chassis * armor_to_cam;

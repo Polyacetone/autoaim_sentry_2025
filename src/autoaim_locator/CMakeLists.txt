@@ -12,6 +12,11 @@ ament_auto_find_build_dependencies()
 file(GLOB sources "src/*.cpp")
 ament_auto_add_library(${PROJECT_NAME} SHARED ${sources})
 
+target_link_libraries(${PROJECT_NAME}
+  ${OpenCV_LIBS}
+  openvino::runtime
+)
+
 rclcpp_components_register_node(${PROJECT_NAME}
   PLUGIN autoaim_locator::LocatorNode
   EXECUTABLE ${PROJECT_NAME}_node
@@ -22,4 +27,5 @@ ament_auto_package(
   INSTALL_TO_SHARE
   config
   launch
+  model
 )

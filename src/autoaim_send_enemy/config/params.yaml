@@ -2,9 +2,9 @@
   ros__parameters:
     default_target_color: 0 # 没收到串口消息时的默认目标颜色，用于调试。0:blue, 1:red
 
-    emaf_center_filter_ratio: 0.8
-    max_temp_lost_frames: 10
-    max_converging_frames: 10
+    emaf_center_filter_ratio: 0.3
+    max_temp_lost_frames: 20
+    max_converging_frames: 3
     car_radius: 0.27
 
     ### Subscribe topics

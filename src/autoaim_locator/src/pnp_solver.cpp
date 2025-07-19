@@ -2,8 +2,10 @@
 
 std::vector<tf2::Transform> PnPSolver::solve_pnp(
     const std::vector<hw_sentry_interfaces::msg::ArmorDetection>& detections,
-    const std::tuple<float, float, float>& gimbal_ypr
-) const {
+    const std::tuple<float, float, float>& gimbal_ypr,
+    const double timestamp,
+    const std::shared_ptr<LSTMPoseSmoothing> lstm
+) {
     std::vector<std::array<cv::Mat, 2>> rvecs;
     std::vector<std::array<cv::Mat, 2>> tvecs;
     std::vector<std::array<float, 2>> reprojerrs;
@@ -15,12 +17,19 @@ std::vector<tf2::Transform> PnPSolver::solve_pnp(
 
     std::vector<int> indexes;
     if (detections.size() == 1) {
-        const int index = select_solution_prior_angle(
-            rotations[0],
-            reprojerrs[0],
-            gimbal_ypr,
-            defs::armor_pitch(static_cast<ArmorLabel>(detections[0].label))
-        );
+        int index;
+        if (lstm) {
+            const float dt = static_cast<float>(std::clamp(timestamp - lstm_prev_update_time_, 0.0, 100.0));
+            index = select_solution_lstm(rotations[0], reprojerrs[0], dt, lstm);
+            lstm_prev_update_time_ = timestamp;
+        } else {
+            index = select_solution_prior_angle(
+                rotations[0],
+                reprojerrs[0],
+                gimbal_ypr,
+                defs::armor_pitch(static_cast<ArmorLabel>(detections[0].label))
+            );
+        }
         indexes.emplace_back(index);
     } else if (detections.size() == 2) {
         const auto index = select_solution_armors_relative_position(
@@ -97,6 +106,21 @@ void PnPSolver::cvcoord_to_tfcoord(
             translations[i][j] = cv_to_tf * tvec;
         }
     }
+}
+
+int PnPSolver::select_solution_lstm(
+    const std::array<Eigen::Quaternionf, 2>& rotations,
+    const std::array<float, 2>& reprojerrs,
+    const float dt,
+    const std::shared_ptr<LSTMPoseSmoothing> lstm
+) const {
+    const auto yaw0 = std::get<0>(utils::to_euler_ypr(rotations[0]));
+    const auto yaw1 = std::get<0>(utils::to_euler_ypr(rotations[1]));
+    const float result = lstm->infer(yaw0, yaw1, reprojerrs[0], reprojerrs[1], dt);
+    std::cout << utils::r2d(result) << std::endl;
+    const float diff0 = std::abs(result - yaw0);
+    const float diff1 = std::abs(result - yaw1);
+    return diff0 > diff1;
 }
 
 int PnPSolver::select_solution_prior_angle(

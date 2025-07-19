@@ -844,7 +844,7 @@ std::tuple<Vector3f, bool> ArmorTracker::predict_shoot_pos(
                 std::get<0>(car_pred)
             );
         }
-        if (car_observer_->is_antispin_palstance_ && car_avg_err_ < AVG_ERR_THRESHOLD) {
+        if (car_observer_->is_antispin_palstance_) {
             return car_pred;
         } else {
             return kf_pred;

@@ -130,13 +130,6 @@ void CameraNode::capture_thread() {
             std::exit(1);
         }
 
-        if (enable_imu_trigger_) {
-            image_msg.header.stamp = get_corresponding_imu_timestamp(current_time);
-        } else {
-            image_msg.header.stamp = current_time;
-        }
-        camera_info_msg.header = image_msg.header;
-
         // 1440*864, BGR8
         const cv::Mat capture_frame(
             cv::Size(out_frame.stFrameInfo.nWidth, out_frame.stFrameInfo.nHeight),
@@ -152,6 +145,13 @@ void CameraNode::capture_thread() {
         // 1280*768 -> 640*384
         cv::Mat resized_img;
         cv::resize(capture_frame, resized_img, cv::Size(640, 384), 0, 0, cv::INTER_LINEAR);
+
+        if (enable_imu_trigger_) {
+            image_msg.header.stamp = get_corresponding_imu_timestamp(current_time);
+        } else {
+            image_msg.header.stamp = current_time;
+        }
+        camera_info_msg.header = image_msg.header;
 
         image_msg.height = resized_img.rows;
         image_msg.width = resized_img.cols;

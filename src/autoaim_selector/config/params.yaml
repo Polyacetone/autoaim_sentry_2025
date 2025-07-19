@@ -8,7 +8,7 @@
     default_target_color: 0
 
     decision_fallback_timeout: 1.0 # 多长时间没收到决策消息就切换回默认模式
-    current_target_max_lost_frames: 10 # 当前目标最多丢失多少帧直到清除
+    current_target_max_lost_frames: 50 # 当前目标最多丢失多少帧直到清除。注意！要大于predictor里的两个max_temp_lost_frames
     switch_new_target_appear_frames: 5 # 新的优先目标出现多少帧才会切换目标
 
     big_armor_length_height_threshold: 2.2

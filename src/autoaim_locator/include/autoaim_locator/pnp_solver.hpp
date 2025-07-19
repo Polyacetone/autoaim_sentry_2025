@@ -11,6 +11,7 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <hw_sentry_interfaces/msg/detections.hpp>
 
+#include <autoaim_locator/lstm_pose_smoothing.hpp>
 #include <autoaim_common_utils/tf_utils.hpp>
 #include <autoaim_common_utils/math_utils.hpp>
 #include <autoaim_common_utils/convert_utils.hpp>
@@ -26,8 +27,10 @@ public:
 
     std::vector<tf2::Transform> solve_pnp(
         const std::vector<hw_sentry_interfaces::msg::ArmorDetection>& detections,
-        const std::tuple<float, float, float>& gimbal_ypr
-    ) const;
+        const std::tuple<float, float, float>& gimbal_ypr,
+        const double timestamp = 0,
+        const std::shared_ptr<LSTMPoseSmoothing> lstm = nullptr
+    );
 
 private:
     void solve_pnp_cv(
@@ -49,6 +52,13 @@ private:
         const std::array<float, 2>& reprojerrs,
         const std::tuple<float, float, float>& gimbal_ypr,
         const float prior_pitch
+    ) const;
+
+    int select_solution_lstm(
+        const std::array<Eigen::Quaternionf, 2>& rotations,
+        const std::array<float, 2>& reprojerrs,
+        const float dt,
+        const std::shared_ptr<LSTMPoseSmoothing> lstm
     ) const;
 
     std::array<int, 2> select_solution_armors_relative_position(
@@ -78,4 +88,6 @@ private:
 
     cv::Mat cam_intrinsic_ = (cv::Mat_<float>(3, 3) << 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
     cv::Mat cam_distortion_ = (cv::Mat_<float>(1, 5) << 0.0, 0.0, 0.0, 0.0, 0.0);
+
+    double lstm_prev_update_time_ = -1;
 };

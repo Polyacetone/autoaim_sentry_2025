@@ -1,5 +1,8 @@
 /**:
   ros__parameters:
+    enable_lstm_smoothing: false
+    lstm_smoothing_model: "v5.onnx"
+
     ### Subscribe topics
     camera_info_topic: "autoaim/camera/camera_info"
     selected_detections_topic: "autoaim/selector/detections"
