@@ -6,7 +6,7 @@ from launch.actions import RegisterEventHandler, LogInfo, OpaqueFunction, SetEnv
 from ament_index_python.packages import get_package_share_directory
 
 namespace = 'hw_sentry'
-node_names = ['camera', 'detector', 'selector', 'locator', 'predictor', 'send_enemy']
+node_names = ['camera', 'detector', 'selector', 'locator', 'predictor', 'send_enemy', 'recorder']
 
 def snake_to_camel(snake_str):
     parts = snake_str.split('_')

@@ -1,0 +1,13 @@
+/**:
+  ros__parameters:
+    video_fps: 100.0
+    video_save_directory: "recordings/" # 目录后面要有一个斜杠
+
+    predictor_status_topic: "autoaim/predictor/predictor_status"
+    shoot_pos_topic: "autoaim/predictor/shoot_pos"
+
+    record_raw: true
+    image_raw_topic: "autoaim/camera/image_raw"
+
+    record_verbose: true
+    image_detected_topic: "autoaim/detector/labeled_image"

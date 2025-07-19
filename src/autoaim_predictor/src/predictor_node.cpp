@@ -72,7 +72,6 @@ PredictorNode::PredictorNode(const rclcpp::NodeOptions& options): Node("autoaim_
 
     enable_print_state_ = declare_parameter<bool>("enable_print_state");
     enable_visualization_marker_ = declare_parameter<bool>("enable_visualization_marker");
-    mode_ = static_cast<AutoaimMode>(declare_parameter<int>("default_mode"));
     bullet_speed_ = declare_parameter<float>("bullet_speed");
     control_to_fire_time_ = declare_parameter<float>("control_to_fire_time");
     shoot_compensate_pitch_ = declare_parameter<float>("shoot_compensate_pitch");

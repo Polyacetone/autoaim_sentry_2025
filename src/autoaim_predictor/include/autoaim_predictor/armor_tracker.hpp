@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Eigen/Dense>
+#include <eigen3/Eigen/Dense>
 #include <opencv2/opencv.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 

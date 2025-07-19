@@ -1,7 +1,11 @@
 #pragma once
 
 #include <cmath>
-#include <Eigen/Dense>
+#include <eigen3/Eigen/Dense>
+#include <tf2/LinearMath/Quaternion.hpp>
+#include <tf2/LinearMath/Matrix3x3.hpp>
+
+#include <autoaim_common_utils/convert_utils.hpp>
 
 namespace utils {
 

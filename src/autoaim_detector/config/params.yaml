@@ -3,6 +3,7 @@
     enable_fps: false
     enable_labeled_image: true
     default_mode: 0 # 没收到决策消息时的默认模式，决策死掉也会回到该模式。-1:null, 0:armor, 1:buff, 2:dart
+    decision_fallback_timeout: 1.0 # 多长时间没收到决策消息就切换回默认模式
 
     model_path: "20250429v11.xml"
     device_name: "NPU"

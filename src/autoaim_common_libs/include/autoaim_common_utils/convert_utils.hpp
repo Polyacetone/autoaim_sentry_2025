@@ -1,7 +1,7 @@
 #pragma once
 
 #include <opencv2/core/types.hpp>
-#include <Eigen/Dense>
+#include <eigen3/Eigen/Dense>
 
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2/LinearMath/Vector3.hpp>

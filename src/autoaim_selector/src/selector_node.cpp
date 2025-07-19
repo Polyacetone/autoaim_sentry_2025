@@ -49,6 +49,7 @@ private:
 };
 
 SelectorNode::SelectorNode(const rclcpp::NodeOptions& options): Node("autoaim_selector", options) {
+    last_recv_decision_time_ = now().seconds();
     default_mode_ = static_cast<AutoaimMode>(declare_parameter<int>("default_mode"));
     mode_ = default_mode_;
     auto default_target_label_priority = declare_parameter<std::vector<int>>("default_target_label_priority");
@@ -64,7 +65,6 @@ SelectorNode::SelectorNode(const rclcpp::NodeOptions& options): Node("autoaim_se
     switch_new_target_appear_frames_ = declare_parameter<int>("switch_new_target_appear_frames");
     big_armor_length_height_threshold_ = declare_parameter<float>("big_armor_length_height_threshold");
     small_armor_length_height_threshold_ = declare_parameter<float>("small_armor_length_height_threshold");
-    last_recv_decision_time_ = now().seconds();
 
     std::string detections_sub_topic = declare_parameter<std::string>("detections_topic");
     std::string target_enemy_sub_topic = declare_parameter<std::string>("target_enemy_topic");

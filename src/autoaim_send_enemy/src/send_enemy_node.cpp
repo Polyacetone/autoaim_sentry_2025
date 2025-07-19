@@ -1,5 +1,5 @@
 #include <rclcpp/rclcpp.hpp>
-#include <Eigen/Dense>
+#include <eigen3/Eigen/Dense>
 #include <opencv2/opencv.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>

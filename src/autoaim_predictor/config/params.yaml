@@ -2,8 +2,6 @@
   ros__parameters:
     enable_print_state: true
     enable_visualization_marker: true
-
-    default_mode: 0 # 没收到决策消息时的默认模式，用于调试。-1:null, 0:armor, 1:buff, 2:dart
     
     bullet_speed: 24.0 # 没收到串口消息时的默认弹速，用于调试。单位: m/s
     control_to_fire_time: 0.047 # 单位: s

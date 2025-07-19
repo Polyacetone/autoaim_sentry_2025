@@ -6,6 +6,7 @@
 #include <hw_sentry_interfaces/msg/detections.hpp>
 #include <hw_sentry_interfaces/msg/target_enemy.hpp>
 
+#include <autoaim_common_definitions/common_definitions.hpp>
 #include <autoaim_detector/openvino_infer_engine.hpp>
 
 namespace autoaim_detector {
@@ -23,13 +24,16 @@ private:
     std::string labeled_image_topic_;
     std::string model_path_;
     std::string device_name_;
-    int mode_ = -1;
+    AutoaimMode mode_ = AutoaimMode::NONE;
+    AutoaimMode default_mode_ = AutoaimMode::NONE;
+    float decision_fallback_timeout_;
     bool enable_labeled_image_;
     bool enable_fps_;
     float confidence_threshold_;
     float nms_threshold_;
 
     std::chrono::high_resolution_clock::time_point prev_callback_time_;
+    double last_recv_decision_time_;
 
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
     rclcpp::Subscription<hw_sentry_interfaces::msg::TargetEnemy>::SharedPtr target_enemy_sub_;
@@ -40,7 +44,9 @@ private:
 };
 
 DetectorNode::DetectorNode(const rclcpp::NodeOptions& options): Node("autoaim_detector", options) {
-    mode_ = declare_parameter<int>("default_mode");
+    last_recv_decision_time_ = now().seconds();
+    default_mode_ = static_cast<AutoaimMode>(declare_parameter<int>("default_mode"));
+    decision_fallback_timeout_ = declare_parameter<float>("decision_fallback_timeout");
     input_image_topic_ = declare_parameter<std::string>("input_image_topic");
     target_enemy_topic_ = declare_parameter<std::string>("target_enemy_topic");
     detections_topic_ = declare_parameter<std::string>("detections_topic");
@@ -69,7 +75,8 @@ DetectorNode::DetectorNode(const rclcpp::NodeOptions& options): Node("autoaim_de
         target_enemy_topic_,
         rclcpp::QoS(1),
         [&](const hw_sentry_interfaces::msg::TargetEnemy::SharedPtr msg) {
-            mode_ = msg->mode;
+            mode_ = static_cast<AutoaimMode>(msg->mode);
+            last_recv_decision_time_ = now().seconds();
         }
     );
     detections_pub_ = create_publisher<hw_sentry_interfaces::msg::Detections>(
@@ -90,6 +97,9 @@ float DetectorNode::get_framerate() {
 }
 
 void DetectorNode::img_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
+    if (now().seconds() - last_recv_decision_time_ > decision_fallback_timeout_) {
+        mode_ = default_mode_;
+    }
     if (enable_fps_) {
         RCLCPP_INFO(get_logger(), "Detection FPS: %.0f", get_framerate());
     }
@@ -98,12 +108,12 @@ void DetectorNode::img_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
     const cv::Mat img = cv_ptr->image;
 
     hw_sentry_interfaces::msg::Detections detections;
-    detections.mode = mode_;
+    detections.mode = static_cast<int>(mode_);
     detections.label = -1;
     detections.header.stamp = msg->header.stamp;
     detections.header.frame_id = "autoaim_camera";
 
-    if (mode_ == 0) {
+    if (mode_ == AutoaimMode::ARMOR) {
         ov_infer_engine_->input_image_ = img.clone();
         ov_infer_engine_->preprocess();
         ov_infer_engine_->infer();
