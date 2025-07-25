@@ -878,9 +878,9 @@ void ArmorTracker::print_colored_status_info() const {
         std::cout << termcolor::bold << "CarAvgErr       " << termcolor::reset;
         std::printf("%4.1f", car_avg_err_ * 100);
         std::cout << std::endl;
-    }
-    if (kf_armor_avg_err_ > AVG_ERR_THRESHOLD && car_avg_err_ > AVG_ERR_THRESHOLD) {
-        std::cout << termcolor::yellow << "Low tracking accuracy!" << termcolor::reset << std::endl;
+        if ((car_observer_->is_antispin_palstance_ ? car_avg_err_ : kf_armor_avg_err_) > AVG_ERR_THRESHOLD) {
+            std::cout << termcolor::yellow << "Low tracking accuracy!" << termcolor::reset << std::endl;
+        }
     }
 }
 

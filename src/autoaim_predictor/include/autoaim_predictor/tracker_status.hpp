@@ -32,8 +32,7 @@ private:
     void set_next_status(StatusType status);
 
     // 两个handler会且仅会被调用其中一个
-    const std::function<void(StatusType from, StatusType to)>
-        status_change_handler; // 状态转移时调用
+    const std::function<void(StatusType from, StatusType to)> status_change_handler; // 状态转移时调用
     const std::function<void(StatusType current)> status_remain_handler; // 状态持续时调用
     unsigned MAX_TEMP_LOST_FRAMES, MAX_CONVERGING_FRAMES;
 

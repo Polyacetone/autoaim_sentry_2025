@@ -12,14 +12,11 @@ LSTMPoseSmoothing::LSTMPoseSmoothing(const std::string& model_path) {
 }
 
 float LSTMPoseSmoothing::infer(float yaw0, float yaw1, float err0, float err1, float dt) {
-    if (dt > 1) {
-        time_elapsed_ = dt;
+    if (dt > 0.5) {
         clear_hidden_states();
-    } else {
-        time_elapsed_ += dt;
+        return yaw0;
     }
-    std::array<float, 5> feature =
-        {yaw0, yaw1, err0 / (err0 + err1), err1 / (err0 + err1), time_elapsed_};
+    std::array<float, 5> feature = {yaw0, yaw1, err0, err1, dt};
     ov::Tensor feature_tensor(inputs_[0].get_element_type(), inputs_[0].get_shape());
     std::copy(feature.begin(), feature.end(), feature_tensor.data<float>());
     infer_request_.set_input_tensor(0, feature_tensor);

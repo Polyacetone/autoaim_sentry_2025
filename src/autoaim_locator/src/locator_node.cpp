@@ -31,6 +31,8 @@ private:
     void detections_callback(const Detections::SharedPtr msg);
     Poses solve_armor_detections(const Detections::SharedPtr msg);
 
+    ArmorLabel current_locating_label_ = ArmorLabel::NONE;
+
     std::unique_ptr<PnPSolver> pnp_solver_;
     std::shared_ptr<LSTMPoseSmoothing> lstm_pose_smoothing_ = nullptr;
 
@@ -96,6 +98,11 @@ Poses LocatorNode::solve_armor_detections(const Detections::SharedPtr msg) {
     poses.mode = msg->mode;
     poses.label = msg->label;
     poses.header.stamp = msg->header.stamp;
+
+    if (current_locating_label_ != static_cast<ArmorLabel>(msg->label)) {
+        current_locating_label_ = static_cast<ArmorLabel>(msg->label);
+        if (lstm_pose_smoothing_) lstm_pose_smoothing_->clear_hidden_states();
+    }
 
     tf2::Transform cam_to_chassis;
     if (!utils::try_lookup_tf(

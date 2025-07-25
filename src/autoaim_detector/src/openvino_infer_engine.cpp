@@ -147,18 +147,24 @@ cv::Mat OpenVINOInferEngine::debug_draw_armors() const {
             cv::Point2f(detection.br.x, detection.br.y),
             cv::Point2f(detection.tr.x, detection.tr.y)
         };
-        for (int j = 0; j < 4; j++) {
-            line(image, kpts[j], kpts[(j + 1) % 4], colors[detection.color], 1);
-        }
-        line(image, kpts[0], kpts[2], colors[detection.color], 1);
-        line(image, kpts[1], kpts[3], colors[detection.color], 1);
-        putText(
+        cv::line(image, kpts[0], kpts[1], colors[detection.color], 2);
+        cv::line(image, kpts[1], kpts[2], colors[detection.color], 2);
+        cv::line(image, kpts[2], kpts[3], colors[detection.color], 2);
+        cv::line(image, kpts[3], kpts[0], colors[detection.color], 2);
+        cv::line(image, kpts[0], kpts[2], colors[detection.color], 1);
+        cv::line(image, kpts[1], kpts[3], colors[detection.color], 1);
+        cv::drawMarker(image, kpts[0], cv::Scalar(255, 255, 0), cv::MARKER_DIAMOND, 4, 2);
+        cv::drawMarker(image, kpts[1], cv::Scalar(255, 0, 255), cv::MARKER_DIAMOND, 4, 2);
+        cv::drawMarker(image, kpts[2], cv::Scalar(0, 255, 255), cv::MARKER_DIAMOND, 4, 2);
+        cv::drawMarker(image, kpts[3], cv::Scalar(0, 255, 0), cv::MARKER_DIAMOND, 4, 2);
+        cv::putText(
             image,
             name[detection.label] + " " + std::to_string(detection.confidence).substr(0, 4),
             cv::Point(kpts[0].x - 5, kpts[0].y - 15),
-            cv::FONT_HERSHEY_COMPLEX,
+            cv::FONT_HERSHEY_TRIPLEX,
             0.7,
-            cv::Scalar(255, 255, 255)
+            cv::Scalar(255, 255, 255),
+            1
         );
     }
     return image;

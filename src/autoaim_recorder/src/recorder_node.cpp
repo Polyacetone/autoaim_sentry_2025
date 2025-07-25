@@ -56,7 +56,7 @@ RecorderNode::RecorderNode(const rclcpp::NodeOptions& options): Node("autoaim_re
 
     if (record_raw_) {
         video_writer_raw_.open(
-            video_save_directory_ + timestr.str() + " raw.mp4",
+            video_save_directory_ + timestr.str() + " raw.mkv",
             cv::VideoWriter::fourcc('a', 'v', 'c', '1'),
             video_fps_,
             cv::Size(640, 384)
@@ -67,7 +67,7 @@ RecorderNode::RecorderNode(const rclcpp::NodeOptions& options): Node("autoaim_re
     }
     if (record_verbose_) {
         video_writer_verbose_.open(
-            video_save_directory_ + timestr.str() + " verbose.mp4",
+            video_save_directory_ + timestr.str() + " verbose.mkv",
             cv::VideoWriter::fourcc('a', 'v', 'c', '1'),
             video_fps_,
             cv::Size(640, 384)
@@ -208,10 +208,10 @@ void RecorderNode::draw_info_on_img(const PredictorStatus::SharedPtr msg, cv::Ma
     const Scalar RED(0, 0, 255);
     const auto FONT = FONT_HERSHEY_DUPLEX;
     const auto text_left_align = [](const Mat& img, const string& s, const Point& p, const Scalar& c) {
-        putText(img, s, Point(p.x, p.y), FONT, 0.5, c);
+        putText(img, s, Point(p.x, p.y), FONT, 0.5, c, 1);
     };
     const auto text_middle_align = [](const Mat& img, const string& s, const Point& p, const Scalar& c) {
-        putText(img, s, Point(p.x - s.size() * 5, p.y), FONT, 0.5, c);
+        putText(img, s, Point(p.x - s.size() * 5, p.y), FONT, 0.5, c, 1);
     };
     char buf[1024];
 
@@ -275,7 +275,7 @@ void RecorderNode::draw_info_on_img(const ShootPos::SharedPtr msg, cv::Mat& img)
     const Scalar WHITE(255, 255, 255);
     const auto FONT = FONT_HERSHEY_DUPLEX;
     const auto text_left_align = [](const Mat& img, const string& s, const Point& p, const Scalar& c) {
-        putText(img, s, Point(p.x, p.y), FONT, 0.5, c);
+        putText(img, s, Point(p.x, p.y), FONT, 0.5, c, 1);
     };
     char buf[1024];
     std::sprintf(buf, "Pitch: %4.1f", r2d(msg->pitch));

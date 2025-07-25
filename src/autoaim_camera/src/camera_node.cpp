@@ -95,7 +95,7 @@ void CameraNode::get_parameters() {
         rclcpp::QoS(1),
         [&](const sensor_msgs::msg::JointState::SharedPtr msg) {
             imu_timestamp_buffer_.emplace_front(msg->header.stamp);
-            if (imu_timestamp_buffer_.size() > 10) {
+            if (imu_timestamp_buffer_.size() > 3) {
                 imu_timestamp_buffer_.pop_back();
             }
         }

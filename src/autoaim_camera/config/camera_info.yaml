@@ -1,0 +1,20 @@
+image_width: 640
+image_height: 384
+camera_name: autoaim_sentry_new
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [1187.3310529859393, 0.0, 310.87540730114205, 0.0, 1185.8133271821991, 132.52497597839331, 0.0, 0.0, 1.0]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [-0.07583148233245297, 0.1054960522295925, 0.0020003798120186824, -0.0004195237746704595, 0.0]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [1179.57763671875, 0.0, 310.1970471394452, 0.0, 0.0, 1180.5599365234375, 132.15158487669487, 0.0, 0.0, 0.0, 1.0, 0.0]
