@@ -131,7 +131,7 @@ private:
     void update_pred_accuracy();
 
     unsigned ERR_QUEUE_SIZE, APPROXIMATE_FRAMERATE;
-    float AVG_ERR_THRESHOLD;
+    float LOW_ACCURACY_ERR_THRESHOLD;
     
     ArmorLabel target_label_;
     std::vector<Armor> pushed_armors_;

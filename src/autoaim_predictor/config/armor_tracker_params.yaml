@@ -6,7 +6,7 @@
 armor_tracker:
   approximate_framerate: 100
   err_queue_size: 80
-  avg_err_threshold: 0.1
+  low_accuracy_err_threshold: 0.1
   
   kf_main_observing_armor:
     process_noise: !!opencv-matrix
@@ -41,10 +41,10 @@ armor_tracker:
     delta_yaw_update_threshold: 0.3
     enter_antispin_palstance: 2.5
     exit_antispin_palstance: 1.0
-    antispin_follow_angle: 0.55
-    antispin_shoot_angle: 0.5
+    antispin_follow_angle: 0.5
+    antispin_shoot_angle: 0.45
     radius_filter_ratio: 0.95
-    height_filter_ratio: 0.9
+    height_filter_ratio: 0.95
     axis_filter_ratio: 0.9
     kf_center:
       process_noise: !!opencv-matrix
@@ -54,9 +54,9 @@ armor_tracker:
         data: [ 1e-0,  0,  0,  0,  0,  0,
                 0,  1e-0,  0,  0,  0,  0,
                 0,  0,  1e-0,  0,  0,  0,
-                0,  0,  0,  5e+1,  0,  0,
-                0,  0,  0,  0,  5e+1,  0,
-                0,  0,  0,  0,  0,  5e+1 ]
+                0,  0,  0,  1e+1,  0,  0,
+                0,  0,  0,  0,  1e+1,  0,
+                0,  0,  0,  0,  0,  1e+1 ]
       measurement_noise: !!opencv-matrix
         rows: 3
         cols: 3
@@ -69,47 +69,47 @@ armor_tracker:
         rows: 2
         cols: 2
         dt: f
-        data: [ 2e-5,  0, 
-                0,  2e-3 ]
+        data: [ 1e-0,  0, 
+                0,  2e+1 ]
       measurement_noise: !!opencv-matrix
         rows: 1
         cols: 1
         dt: f
-        data: [ 5e-3 ]
+        data: [ 1e-1 ]
 
   outpost_observer:
     radius: 0.25
     switch_armor_angle: 1.0
     delta_yaw_update_threshold: 0.2
     outpost_follow_angle: 0.7
-    outpost_can_shoot_angle: 0.7
+    outpost_can_shoot_angle: 0.65
     kf_center:
       process_noise: !!opencv-matrix
         rows: 6
         cols: 6
         dt: f
-        data: [ 1e-2,  0,  0,  0,  0,  0,
-                0,  1e-2,  0,  0,  0,  0,
-                0,  0,  1e-2,  0,  0,  0,
-                0,  0,  0,  1e-3,  0,  0,
-                0,  0,  0,  0,  1e-3,  0,
-                0,  0,  0,  0,  0,  1e-3 ]
+        data: [ 1e-1,  0,  0,  0,  0,  0,
+                0,  1e-1,  0,  0,  0,  0,
+                0,  0,  1e-1,  0,  0,  0,
+                0,  0,  0,  1e-0,  0,  0,
+                0,  0,  0,  0,  1e-0,  0,
+                0,  0,  0,  0,  0,  1e-0 ]
       measurement_noise: !!opencv-matrix
         rows: 3
         cols: 3
         dt: f
-        data: [ 5e-2,  0,  0,
-                0,  5e-2,  0,
-                0,  0,  5e-2 ]
+        data: [ 1e+1,  0,  0,
+                0,  1e+1,  0,
+                0,  0,  1e+1 ]
     kf_yaw:
       process_noise: !!opencv-matrix
         rows: 2
         cols: 2
         dt: f
-        data: [ 5e-5,  0, 
-                0,  1e-4 ]
+        data: [ 1e-1,  0, 
+                0,  2e-0 ]
       measurement_noise: !!opencv-matrix
         rows: 1
         cols: 1
         dt: f
-        data: [ 1e-2 ]
+        data: [ 1e-1 ]

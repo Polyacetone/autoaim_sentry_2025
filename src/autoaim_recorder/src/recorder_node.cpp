@@ -61,6 +61,7 @@ RecorderNode::RecorderNode(const rclcpp::NodeOptions& options): Node("autoaim_re
             video_fps_,
             cv::Size(640, 384)
         );
+        video_writer_raw_.set(cv::VIDEOWRITER_PROP_QUALITY, 100);
         if (!video_writer_raw_.isOpened()) {
             RCLCPP_ERROR(get_logger(), "Failed to open video writer!");
         }
@@ -72,6 +73,7 @@ RecorderNode::RecorderNode(const rclcpp::NodeOptions& options): Node("autoaim_re
             video_fps_,
             cv::Size(640, 384)
         );
+        video_writer_verbose_.set(cv::VIDEOWRITER_PROP_QUALITY, 100);
         if (!video_writer_verbose_.isOpened()) {
             RCLCPP_ERROR(get_logger(), "Failed to open video writer!");
         }
@@ -138,9 +140,10 @@ void RecorderNode::get_parameters() {
 }
 
 void RecorderNode::img_raw_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
+    if (!video_writer_raw_.isOpened()) return;
     const auto cv_ptr = cv_bridge::toCvShare(msg, "bgr8");
     if (cv_ptr->image.empty()) {
-        RCLCPP_WARN(get_logger(), "img_detected_callback() get an empty frame, ignoring");
+        RCLCPP_WARN(get_logger(), "img_raw_callback() get an empty frame, ignoring");
         return;
     }
     cv::Mat image = cv_ptr->image.clone();
@@ -151,6 +154,7 @@ void RecorderNode::img_raw_callback(const sensor_msgs::msg::Image::SharedPtr msg
 }
 
 void RecorderNode::img_detected_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
+    if (!video_writer_verbose_.isOpened()) return;
     const auto cv_ptr = cv_bridge::toCvShare(msg, "bgr8");
     if (cv_ptr->image.empty()) {
         RCLCPP_WARN(get_logger(), "img_detected_callback() get an empty frame, ignoring");

@@ -635,9 +635,9 @@ void OutpostObserver::write_predictor_status(hw_sentry_interfaces::msg::Predicto
 ***********************************************************************************/
 
 ArmorTracker::ArmorTracker(const cv::FileNode& fn) {
-    AVG_ERR_THRESHOLD = static_cast<float>(fn["avg_err_threshold"]);
     ERR_QUEUE_SIZE = static_cast<int>(fn["err_queue_size"]);
     APPROXIMATE_FRAMERATE = static_cast<int>(fn["approximate_framerate"]);
+    LOW_ACCURACY_ERR_THRESHOLD = static_cast<float>(fn["low_accuracy_err_threshold"]);
     kf_main_observing_armor_ = std::make_unique<KF<3>>(fn["kf_main_observing_armor"]);
     car_status_ = std::make_unique<TrackerStatus>(
         fn["car_status"],
@@ -878,7 +878,7 @@ void ArmorTracker::print_colored_status_info() const {
         std::cout << termcolor::bold << "CarAvgErr       " << termcolor::reset;
         std::printf("%4.1f", car_avg_err_ * 100);
         std::cout << std::endl;
-        if ((car_observer_->is_antispin_palstance_ ? car_avg_err_ : kf_armor_avg_err_) > AVG_ERR_THRESHOLD) {
+        if ((car_observer_->is_antispin_palstance_ ? car_avg_err_ : kf_armor_avg_err_) > LOW_ACCURACY_ERR_THRESHOLD) {
             std::cout << termcolor::yellow << "Low tracking accuracy!" << termcolor::reset << std::endl;
         }
     }

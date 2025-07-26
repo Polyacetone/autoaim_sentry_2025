@@ -23,7 +23,7 @@ std::vector<tf2::Transform> PnPSolver::solve_pnp(
     if (detections.size() == 1) {
         int index;
         if (lstm) {
-            const float dt = static_cast<float>(std::clamp(timestamp - lstm_prev_update_time_, 0.0, 100.0));
+            const float dt = static_cast<float>(std::clamp(timestamp - lstm_prev_update_time_, 0.0, 10.0));
             index = select_solution_lstm(rotations[0], reprojerrs[0], dt, lstm);
             lstm_prev_update_time_ = timestamp;
         } else {
