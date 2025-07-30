@@ -31,6 +31,7 @@ public:
     void reset();
     void update(bool is_valid);
     StatusType status() const;
+    unsigned current_status_frames() const;
     void print_colored_status_info() const;
 
 private:

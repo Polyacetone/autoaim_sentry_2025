@@ -154,7 +154,7 @@ void PredictorNode::poses_callback(const Poses::SharedPtr msg) {
         armor_tracker_->update(rclcpp::Time(msg->header.stamp).seconds());
         send_predictor_status(msg->header);
         if (armor_tracker_->status() == StatusType::LOST) return;
-        auto [target, can_shoot]= predict_armor_target(msg->header.stamp);
+        auto [target, can_shoot] = predict_armor_target(msg->header.stamp);
         if (target != Eigen::Vector3f(0, 0, 0)) {
             send_shoot_pos(msg->header.stamp, target, can_shoot ? 2 : 0);
         }
@@ -173,7 +173,7 @@ void PredictorNode::poses_callback(const Poses::SharedPtr msg) {
         buff_tracker_->update(rclcpp::Time(msg->header.stamp).seconds());
         send_predictor_status(msg->header);
         if (buff_tracker_->status() == StatusType::LOST) return;
-        auto [target, can_shoot]= predict_buff_target(msg->header.stamp);
+        auto [target, can_shoot] = predict_buff_target(msg->header.stamp);
         if (target != Eigen::Vector3f(0, 0, 0)) {
             send_shoot_pos(msg->header.stamp, target, can_shoot ? 1 : 0);
         }

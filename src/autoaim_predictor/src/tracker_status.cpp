@@ -36,6 +36,7 @@ void TrackerStatus::set_next_status(StatusType status) {
 
 void TrackerStatus::reset() { status_ = StatusType::LOST; current_status_frames_ = 0; }
 StatusType TrackerStatus::status() const { return status_; }
+unsigned TrackerStatus::current_status_frames() const { return current_status_frames_; }
 
 void TrackerStatus::update(bool is_valid) {
     using TS = StatusType;

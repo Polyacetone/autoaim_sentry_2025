@@ -4,12 +4,25 @@
 # 均采用国际单位制，距离为m，时间为s，角度为rad
 
 buff_tracker:
+  temp_lost_return_frames: 5
+  
   small_buff_status:
-    max_temp_lost_frames: 20
-    max_converging_frames: 20
+    max_temp_lost_frames: 30
+    max_converging_frames: 50
   
   small_buff_observer:
-    queue_size: 20
-    queue_sample_interval: 5
     small_buff_speed: 1.047197551 # 60deg/s
-    R_center_filter_ratio: 0.3
+    switch_buff_angle: 0.8
+    R_center_filter_ratio: 0.1
+    kf_angle:
+      process_noise: !!opencv-matrix
+        rows: 2
+        cols: 2
+        dt: f
+        data: [ 1e-1,  0, 
+                0,  1e-0 ]
+      measurement_noise: !!opencv-matrix
+        rows: 1
+        cols: 1
+        dt: f
+        data: [ 1e-1 ]

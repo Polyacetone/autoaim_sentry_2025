@@ -81,7 +81,7 @@ DetectorNode::DetectorNode(const rclcpp::NodeOptions& options): Node("autoaim_de
     buff_infer_engine_ = std::make_unique<OpenVINOInferEngine>(
         buff_model_path_,
         device_name_,
-        2, 2, 8,
+        2, 2, 9,
         confidence_threshold_,
         nms_threshold_
     );

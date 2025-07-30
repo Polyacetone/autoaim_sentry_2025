@@ -1,7 +1,10 @@
 #include <autoaim_predictor/buff_tracker.hpp>
 
 using namespace Eigen;
+using Scalarf = Vector<float, 1>;
+
 static constexpr float BUFF_RADIUS = 0.7f; // Buff的半径
+static constexpr float ADJACENT_LEAF_ANGLE = 2 * M_PI / 5; // 相邻符叶的夹角
 
 /**********************************************************************************
 ***********************************    Utils    ***********************************
@@ -31,54 +34,52 @@ Buff::Buff(const tf2::Transform& buff_pose) {
 ***********************************************************************************/
 
 SmallBuffObserver::SmallBuffObserver(const cv::FileNode& fn) {
-    QUEUE_SIZE = static_cast<int>(fn["queue_size"]);
-    QUEUE_SAMPLE_INTERVAL = static_cast<int>(fn["queue_sample_interval"]);
     SMALL_BUFF_SPEED = static_cast<float>(fn["small_buff_speed"]);
+    SWITCH_BUFF_ANGLE = static_cast<float>(fn["switch_buff_angle"]);
     R_center_ = std::make_unique<EMAF<3>>(fn["R_center_filter_ratio"]);
+    kf_angle_ = std::make_unique<KF<1>>(fn["kf_angle"]);
+    reset();
 }
 
 void SmallBuffObserver::reset() {
-    buff_angles_.clear();
     R_center_->reset();
-    rotation_direction_ = RotationDirection::UNKNOWN;
+    kf_angle_->reset();
 }
 
 void SmallBuffObserver::initialize(const std::vector<Buff>& buffs) {
     reset();
-    buff_angles_.push_back(buffs[0].angle);
+    kf_angle_->initialize(Scalarf(buffs[0].angle));
     R_center_->initialize(buffs[0].R_center);
 }
 
-void SmallBuffObserver::update(const std::vector<Buff>& buffs) {
-    buff_angles_.push_back(buffs[0].angle);
-    R_center_->update(buffs[0].R_center);
-    theta_ = buffs[0].angle;
-    if (buff_angles_.size() <= QUEUE_SIZE) {
-        rotation_direction_ = RotationDirection::UNKNOWN;
-    } else {
-        buff_angles_.pop_front();
-        int direction_counts = 0;
-        for (size_t i = 1; i < QUEUE_SIZE / QUEUE_SAMPLE_INTERVAL; i++) {
-            float angle_diff = utils::rad_period_correction(
-                buff_angles_[i * QUEUE_SAMPLE_INTERVAL] - buff_angles_[(i - 1) * QUEUE_SAMPLE_INTERVAL]
-            );
-            direction_counts += angle_diff < 0 ? -1 : 1;
-        }
-        rotation_direction_ = direction_counts < 0 ?
-            RotationDirection::CLOCKWISE : RotationDirection::COUNTERCLOCKWISE;
+void SmallBuffObserver::predict(const float time_elapsed) const {
+    kf_angle_->predict(time_elapsed);
+    if (kf_angle_->value().value() > M_PI) {
+        kf_angle_->force_change_value(Scalarf(kf_angle_->value().value() - M_PI * 2));
+    } else if (kf_angle_->value().value() < -M_PI) {
+        kf_angle_->force_change_value(Scalarf(kf_angle_->value().value() + M_PI * 2));
     }
 }
 
-std::tuple<Vector3f, bool> SmallBuffObserver::predict_shoot_pos(
+void SmallBuffObserver::update(const std::vector<Buff>& buffs) {
+    const float buff_angle = utils::rad_period_correction(buffs[0].angle);
+    if (std::abs(buff_angle - kf_angle_->value().value()) > SWITCH_BUFF_ANGLE) {
+        kf_angle_->force_change_value(Scalarf(buff_angle));
+    } else {
+        kf_angle_->update(Scalarf(buff_angle));
+    }
+    R_center_->update(buffs[0].R_center);
+}
+
+Vector3f SmallBuffObserver::predict_shoot_pos(
     const float bullet_speed,
     const float img_to_fire_time,
     const Vector3f fric_to_gimbal_yaw
 ) const {
-    if(rotation_direction_ == RotationDirection::UNKNOWN) return {R_center_->value(), false};
     float fly_time = 0;
+    int direction_sign = (kf_angle_->derivative().value() < 0) ? -1 : 1;
     for (int i = 0; i < 5; i++) {
-        int direction_sign = rotation_direction_ == RotationDirection::CLOCKWISE ? -1 : 1;
-        const float pred_angle = theta_ + direction_sign * SMALL_BUFF_SPEED * (img_to_fire_time + fly_time);
+        const float pred_angle = kf_angle_->value().value() + direction_sign * SMALL_BUFF_SPEED * (img_to_fire_time + fly_time);
         Vector3f pred_leaf_position = calc_leaf_position(R_center_->value(), pred_angle);
         Vector3f target_to_fake_fric = pred_leaf_position - fric_to_gimbal_yaw;
         fly_time = std::get<1>(trajectory::get_pitch_air_frac(
@@ -88,11 +89,12 @@ std::tuple<Vector3f, bool> SmallBuffObserver::predict_shoot_pos(
         ));
     }
     float img_to_hit_time = img_to_fire_time + fly_time;
-    int direction_sign = rotation_direction_ == RotationDirection::CLOCKWISE ? -1 : 1;
-    const float pred_angle = theta_ + direction_sign * SMALL_BUFF_SPEED * img_to_hit_time;
+    const float pred_angle = kf_angle_->value().value() + direction_sign * SMALL_BUFF_SPEED * img_to_hit_time;
     Vector3f pred_leaf_position = calc_leaf_position(R_center_->value(), pred_angle);
-    return {pred_leaf_position, true};
+    return pred_leaf_position;
 }
+
+Vector3f SmallBuffObserver::get_R_center() const { return R_center_->value(); }
 
 void SmallBuffObserver::print_colored_status_info() const {
     const auto print_vec = [](const char* format, Vector3f vec) {
@@ -101,19 +103,18 @@ void SmallBuffObserver::print_colored_status_info() const {
     std::cout << termcolor::bold << "SmallBuff.RCenter   " << termcolor::reset;
     print_vec("[% 4.0f, % 4.0f, % 4.0f]\n", R_center_->value() * 100);
     std::cout << termcolor::bold << "SmallBuff.Theta     " << termcolor::reset;
-    std::printf("[% 4.0f]\n", utils::r2d(theta_));
-    std::cout << termcolor::bold << "SmallBuff.Direction " << termcolor::reset;
-    switch (rotation_direction_) {
-        case RotationDirection::CLOCKWISE: std::cout << "clockwise"; break;
-        case RotationDirection::COUNTERCLOCKWISE: std::cout << "counterclockwise"; break;
-        case RotationDirection::UNKNOWN: std::cout << "unknown"; break;
-    }
+    std::printf(
+        "[% 4.0f] += [% 4.0f] (%s)",
+        utils::r2d(kf_angle_->value().value()),
+        utils::r2d(kf_angle_->derivative().value()),
+        kf_angle_->derivative().value() > 0 ? "counterclockwise" : "clockwise"
+    );
     std::cout << std::endl;
 }
 
 void SmallBuffObserver::write_predictor_status(hw_sentry_interfaces::msg::PredictorStatus& status) const {
     status.r_center = utils::convert_to<geometry_msgs::msg::Point32>(R_center_->value());
-    status.theta = theta_;
+    status.theta = kf_angle_->value().value();
 }
 
 /**********************************************************************************
@@ -121,6 +122,7 @@ void SmallBuffObserver::write_predictor_status(hw_sentry_interfaces::msg::Predic
 ***********************************************************************************/
 
 BuffTracker::BuffTracker(const cv::FileNode& fn) {
+    TEMP_LOST_RETURN_FRAMES = static_cast<int>(fn["temp_lost_return_frames"]);
     small_buff_status_ = std::make_unique<TrackerStatus>(
         fn["small_buff_status"],
         [this](StatusType from, StatusType to) { status_change_handler(from, to); },
@@ -130,7 +132,12 @@ BuffTracker::BuffTracker(const cv::FileNode& fn) {
 }
 
 StatusType BuffTracker::status() const {
-    return small_buff_status_->status();
+    if (mode_ == AutoaimMode::SMALL_BUFF) {
+        return small_buff_status_->status();
+    } else if (mode_ == AutoaimMode::BIG_BUFF) {
+        // ...
+    }
+    return {};
 }
 
 void BuffTracker::push(const Buff& buff) {
@@ -174,6 +181,14 @@ void BuffTracker::status_change_handler(StatusType from, StatusType to) {
 }
 
 void BuffTracker::status_remain_handler(StatusType current) {
+    if (current != StatusType::LOST) { // 预测
+        const float time_elapsed = static_cast<float>(current_update_time_ - prev_update_time_);
+        if (mode_ == AutoaimMode::SMALL_BUFF) {
+            small_buff_observer_->predict(time_elapsed);
+        } else {
+            // ...
+        }
+    }
     if (current == StatusType::CONVERGING || current == StatusType::TRACKING) { // 更新
         if (mode_ == AutoaimMode::SMALL_BUFF) {
             small_buff_observer_->update(pushed_buffs_);
@@ -189,7 +204,16 @@ std::tuple<Vector3f, bool> BuffTracker::predict_shoot_pos(
     const Vector3f fric_to_gimbal_yaw
 ) const {
     if (mode_ == AutoaimMode::SMALL_BUFF) {
-        return small_buff_observer_->predict_shoot_pos(bullet_speed, img_to_fire_time, fric_to_gimbal_yaw);
+        if (small_buff_status_->status() == StatusType::CONVERGING ||
+            (small_buff_status_->status() == StatusType::TEMP_LOST &&
+            small_buff_status_->current_status_frames() > TEMP_LOST_RETURN_FRAMES)) {
+            return {small_buff_observer_->get_R_center(), false}; // 如果收敛中或者短暂丢失大于一定时间，则指向R_center
+        } else {
+            return {
+                small_buff_observer_->predict_shoot_pos(bullet_speed, img_to_fire_time, fric_to_gimbal_yaw),
+                small_buff_status_->status() != StatusType::TEMP_LOST
+            };
+        }
     } else if (mode_ == AutoaimMode::BIG_BUFF) {
         // ...
     }

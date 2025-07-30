@@ -29,27 +29,24 @@ public:
     explicit SmallBuffObserver(const cv::FileNode& fn);
     void reset();
     void initialize(const std::vector<Buff>& buffs);
+    void predict(const float time_elapsed) const;
     void update(const std::vector<Buff>& buffs);
-    std::tuple<Eigen::Vector3f, bool> predict_shoot_pos(
+    Eigen::Vector3f predict_shoot_pos(
         const float bullet_speed,
         const float img_to_fire_time,
         const Eigen::Vector3f fric_to_gimbal_yaw
     ) const;
+    Eigen::Vector3f get_R_center() const; // 如果收敛中，则指向R_center
 
     void print_colored_status_info() const;
     void write_predictor_status(hw_sentry_interfaces::msg::PredictorStatus& status) const;
 
 private:
     float SMALL_BUFF_SPEED; // 小buff的旋转速度
-    unsigned QUEUE_SIZE; // 连续存储buff角度，达到收敛次数后判断旋转方向
-    unsigned QUEUE_SAMPLE_INTERVAL; // 队列用于判断旋转方向的采样间隔
+    float SWITCH_BUFF_ANGLE; // 切换buff的角度阈值
 
-    std::deque<float> buff_angles_; // buff转角序列
+    std::unique_ptr<KF<1>> kf_angle_;
     std::unique_ptr<EMAF<3>> R_center_;
-    float theta_;
-
-    enum class RotationDirection {UNKNOWN, CLOCKWISE, COUNTERCLOCKWISE};
-    RotationDirection rotation_direction_ = RotationDirection::UNKNOWN; // 当前buff的旋转方向
 };
 
 class BuffTracker {
@@ -72,6 +69,8 @@ public:
 private:
     void status_change_handler(StatusType from, StatusType to);
     void status_remain_handler(StatusType current);
+
+    unsigned TEMP_LOST_RETURN_FRAMES;
 
     AutoaimMode mode_ = AutoaimMode::NONE;
 

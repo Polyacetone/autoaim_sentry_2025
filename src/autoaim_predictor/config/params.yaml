@@ -4,7 +4,7 @@
     enable_visualization_marker: true
     
     bullet_speed: 24.0 # 没收到串口消息时的默认弹速，用于调试。单位: m/s
-    control_to_fire_time: 0.04 # 单位: s
+    control_to_fire_time: 0.047 # 单位: s
     shoot_compensate_pitch: 0.025 # 单位: rad
     shoot_compensate_yaw: 0.0 # 单位: rad
 
