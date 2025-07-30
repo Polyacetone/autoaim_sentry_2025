@@ -30,8 +30,11 @@ private:
     void camera_info_callback(const CameraInfo::SharedPtr msg);
     void detections_callback(const Detections::SharedPtr msg);
     Poses solve_armor_detections(const Detections::SharedPtr msg);
+    Poses solve_buff_detections(const Detections::SharedPtr msg);
 
-    ArmorLabel current_locating_label_ = ArmorLabel::NONE;
+    std::string basis_frame_id_;
+
+    ArmorType current_locating_label_ = ArmorType::NONE;
 
     std::unique_ptr<PnPSolver> pnp_solver_;
     std::shared_ptr<LSTMPoseSmoothing> lstm_pose_smoothing_ = nullptr;
@@ -51,6 +54,10 @@ LocatorNode::LocatorNode(const rclcpp::NodeOptions& options): Node("autoaim_loca
     tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
     pnp_solver_ = std::make_unique<PnPSolver>();
     
+    basis_frame_id_ = declare_parameter<std::string>("basis_frame_id");
+    if (basis_frame_id_ != "map" && basis_frame_id_ != "chassis") {
+        throw std::invalid_argument("invalid basis frame id");
+    }
     bool enable_lstm_smoothing = declare_parameter<bool>("enable_lstm_smoothing");
     if (enable_lstm_smoothing) {
         std::string model_name = declare_parameter<std::string>("lstm_smoothing_model");
@@ -85,8 +92,8 @@ void LocatorNode::detections_callback(const Detections::SharedPtr msg) {
     Poses poses;
     if (mode == AutoaimMode::ARMOR) {
         poses = solve_armor_detections(msg);
-    } else if (mode == AutoaimMode::BUFF) {
-        // solve buff detections
+    } else if (mode == AutoaimMode::SMALL_BUFF || mode == AutoaimMode::BIG_BUFF) {
+        poses = solve_buff_detections(msg);
     } else if (mode == AutoaimMode::DART) {
         // solve dart detections
     }
@@ -99,8 +106,8 @@ Poses LocatorNode::solve_armor_detections(const Detections::SharedPtr msg) {
     poses.label = msg->label;
     poses.header.stamp = msg->header.stamp;
 
-    if (current_locating_label_ != static_cast<ArmorLabel>(msg->label)) {
-        current_locating_label_ = static_cast<ArmorLabel>(msg->label);
+    if (current_locating_label_ != static_cast<ArmorType>(msg->label)) {
+        current_locating_label_ = static_cast<ArmorType>(msg->label);
         if (lstm_pose_smoothing_) lstm_pose_smoothing_->clear_hidden_states();
     }
 
@@ -129,18 +136,21 @@ Poses LocatorNode::solve_armor_detections(const Detections::SharedPtr msg) {
     )) return poses;
 
     tf2::Transform chassis_to_basis;
-    chassis_to_basis.setIdentity();
-    if (utils::try_lookup_tf(
-        tf_buffer_,
-        "map",
-        "chassis",
-        {},
-        chassis_to_basis,
-        [&](const std::string& err) {
-            RCLCPP_WARN(get_logger(), "Failed to lookup chassis to map: %s", err.c_str());
-        }
-    )) poses.header.frame_id = "map";
-    else poses.header.frame_id = "chassis";
+    poses.header.frame_id = basis_frame_id_;
+    if (basis_frame_id_ == "map") {
+        utils::try_lookup_tf(
+            tf_buffer_,
+            "map",
+            "chassis",
+            {},
+            chassis_to_basis,
+            [&](const std::string& err) {
+                RCLCPP_WARN(get_logger(), "Failed to lookup chassis to map: %s", err.c_str());
+            }
+        );
+    } else if (basis_frame_id_ == "chassis") {
+        chassis_to_basis.setIdentity();
+    }
 
     auto gimbal_to_basis = chassis_to_basis * gimbal_to_chassis;
     auto gimbal_ypr = utils::to_euler_ypr(gimbal_to_basis.getRotation());
@@ -157,6 +167,35 @@ Poses LocatorNode::solve_armor_detections(const Detections::SharedPtr msg) {
         }
     );
 
+    return poses;
+}
+
+Poses LocatorNode::solve_buff_detections(const Detections::SharedPtr msg) {
+    Poses poses;
+    poses.mode = msg->mode;
+    poses.label = msg->label;
+    poses.header.frame_id = "gimbal_yaw";
+    poses.header.stamp = msg->header.stamp;
+
+    tf2::Transform cam_to_gimbal_yaw;
+    if (!utils::try_lookup_tf(
+        tf_buffer_,
+        "gimbal_yaw",
+        "autoaim_camera",
+        msg->header.stamp,
+        cam_to_gimbal_yaw,
+        [&](const std::string& err) {
+            RCLCPP_WARN(get_logger(), "Failed to lookup camera to gimbal yaw: %s", err.c_str());
+        }
+    )) return poses;
+    
+    auto buffs_to_cam = pnp_solver_->solve_pnp(msg->buff_detections, {});
+    std::transform(buffs_to_cam.begin(), buffs_to_cam.end(), std::back_inserter(poses.poses),
+        [&](const auto& buff_to_cam) {
+            auto buff_to_basis = cam_to_gimbal_yaw * buff_to_cam;
+            return utils::convert_to<geometry_msgs::msg::Pose>(buff_to_basis);
+        }
+    );
     return poses;
 }
 

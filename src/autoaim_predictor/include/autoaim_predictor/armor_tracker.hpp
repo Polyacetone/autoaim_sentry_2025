@@ -44,7 +44,7 @@ public:
     std::tuple<Eigen::Vector3f, bool> predict_shoot_pos(
         const float gimbal_yaw_to_basis,
         const float img_to_hit_time
-    ) const;
+    );
     void print_colored_status_info() const;
     std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>> get_all_armors() const;
     void write_predictor_status(hw_sentry_interfaces::msg::PredictorStatus& status) const;
@@ -56,7 +56,8 @@ private:
     const unsigned ARMORS_COUNT = 4; // 车有4个装甲板
     float INITIAL_RADIUS, SWITCH_ARMOR_ANGLE, DELTA_YAW_UPDATE_THRESHOLD;
     float ENTER_ANTISPIN_PALSTANCE, EXIT_ANTISPIN_PALSTANCE;
-    float ANTISPIN_FOLLOW_ANGLE, ANTISPIN_SHOOT_ANGLE;
+    float ANTISPIN_SHOOT_ANGLE;
+    unsigned ANTISPIN_OUT_OF_SHOOT_ANGLE_THRESHOLD, ANTISPIN_IN_SHOOT_ANGLE_THRESHOLD;
 
     // 目前主要观测的装甲板编号。一般来说主要观测的是可视面积最大的那块，对应pushed_armors_[0]
     // 定义第一块看到的装甲板为0，车逆时针转（角速度>0）时看到的依次编号1、2、3
@@ -68,6 +69,7 @@ private:
     std::unique_ptr<EMAF<3>> axis_; // 车的旋转轴
     std::unique_ptr<KF<3>> kf_center_; // 车中心的位置。车中心在转轴上的高度由0号装甲板确定，即认为0号装甲板对应的中心就是车的中心
     std::unique_ptr<KF<1>> kf_yaw_; // 0号装甲板累计绕旋转轴转的角度
+    unsigned out_of_shoot_angle_count_ = 0, in_shoot_angle_count_ = 0; // 装甲板超过或进入跟踪角度范围的帧数
 };
 
 class OutpostObserver {
@@ -85,7 +87,7 @@ public:
     std::tuple<Eigen::Vector3f, bool> predict_shoot_pos(
         const float gimbal_yaw_to_basis,
         const float img_to_hit_time
-    ) const;
+    );
     void print_colored_status_info() const;
     std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>> get_all_armors() const;
     void write_predictor_status(hw_sentry_interfaces::msg::PredictorStatus& status) const;
@@ -95,19 +97,21 @@ public:
 private:
     const unsigned ARMORS_COUNT = 3; // 前哨站有3个装甲板
     float RADIUS, SWITCH_ARMOR_ANGLE, DELTA_YAW_UPDATE_THRESHOLD;
-    float OUTPOST_FOLLOW_ANGLE, OUTPOST_CAN_SHOOT_ANGLE;
+    float OUTPOST_SHOOT_ANGLE;
+    unsigned OUTPOST_OUT_OF_SHOOT_ANGLE_THRESHOLD, OUTPOST_IN_SHOOT_ANGLE_THRESHOLD;
 
     float accumulated_yaw_; // 第一次看到的装甲板yaw角，作为观测量更新kf_rotation_angle
     float prev_main_observing_yaw_; // 上一帧作为主要观测装甲板的yaw角，用于逐差更新accumulated_yaw
     std::unique_ptr<KF<3>> kf_center_; // 车中心的位置
     std::unique_ptr<KF<1>> kf_yaw_; // 第一次看到的装甲板累计绕旋转轴转的角度
+    unsigned out_of_shoot_angle_count_ = 0, in_shoot_angle_count_ = 0; // 装甲板超过或进入跟踪角度范围的帧数
 };
 
 class ArmorTracker {
 public:
     explicit ArmorTracker(const cv::FileNode& fn);
 
-    void set_target_label(ArmorLabel label);
+    void set_target_label(ArmorType label);
     void push(const Armor& armor);
     void update(const double timestamp);
     void reset();
@@ -133,7 +137,7 @@ private:
     unsigned ERR_QUEUE_SIZE, APPROXIMATE_FRAMERATE;
     float LOW_ACCURACY_ERR_THRESHOLD;
     
-    ArmorLabel target_label_;
+    ArmorType target_label_;
     std::vector<Armor> pushed_armors_;
     double prev_update_time_, current_update_time_;
 

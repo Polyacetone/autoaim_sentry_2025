@@ -1,93 +1,159 @@
 #include <autoaim_locator/pnp_solver.hpp>
+#include <variant>
+#include <vector>
+
+using namespace hw_sentry_interfaces::msg;
 
 std::vector<tf2::Transform> PnPSolver::solve_pnp(
-    const std::vector<hw_sentry_interfaces::msg::ArmorDetection>& detections,
+    const std::variant<std::vector<ArmorDetection>, std::vector<BuffDetection>>& detections,
     const std::tuple<float, float, float>& gimbal_ypr,
     const double timestamp,
     const std::shared_ptr<LSTMPoseSmoothing> lstm
 ) {
-    if (detections.size() != 1 && detections.size() != 2) {
-        return {};
-    }
+    if (std::holds_alternative<std::vector<BuffDetection>>(detections)) {
+        const auto& buff_detections = std::get<std::vector<BuffDetection>>(detections);
+        if (buff_detections.size() != 1) {
+            return {};
+        }
+        
+        std::vector<std::array<cv::Mat, 2>> rvecs;
+        std::vector<std::array<cv::Mat, 2>> tvecs;
+        std::vector<std::array<float, 2>> reprojerrs;
+        solve_pnp_cv(buff_detections, rvecs, tvecs, reprojerrs);
 
-    std::vector<std::array<cv::Mat, 2>> rvecs;
-    std::vector<std::array<cv::Mat, 2>> tvecs;
-    std::vector<std::array<float, 2>> reprojerrs;
-    solve_pnp_cv(detections, rvecs, tvecs, reprojerrs);
-
-    std::vector<std::array<Eigen::Quaternionf, 2>> rotations;
-    std::vector<std::array<Eigen::Vector3f, 2>> translations;
-    cvcoord_to_tfcoord(rvecs, tvecs, rotations, translations);
-
-    std::vector<int> indexes;
-    if (detections.size() == 1) {
-        int index;
-        if (lstm) {
-            const float dt = static_cast<float>(std::clamp(timestamp - lstm_prev_update_time_, 0.0, 10.0));
-            index = select_solution_lstm(rotations[0], reprojerrs[0], dt, lstm);
-            lstm_prev_update_time_ = timestamp;
-        } else {
-            index = select_solution_prior_angle(
-                rotations[0],
-                reprojerrs[0],
-                gimbal_ypr,
-                defs::armor_pitch(static_cast<ArmorLabel>(detections[0].label))
+        std::vector<std::array<Eigen::Quaternionf, 2>> rotations;
+        std::vector<std::array<Eigen::Vector3f, 2>> translations;
+        cvcoord_to_tfcoord(rvecs, tvecs, rotations, translations);
+        
+        std::vector<tf2::Transform> buffs_to_cam;
+        for (size_t i = 0; i < rotations.size(); i++) {
+            buffs_to_cam.emplace_back(
+                utils::convert_to<tf2::Quaternion>(rotations[i][0]),
+                utils::convert_to<tf2::Vector3>(translations[i][0])
             );
         }
-        indexes.emplace_back(index);
-    } else if (detections.size() == 2) {
-        const auto index = select_solution_armors_relative_position(
-            {rotations[0], rotations[1]},
-            {translations[0], translations[1]}
-        );
-        indexes.emplace_back(index[0]);
-        indexes.emplace_back(index[1]);
-    }
-    
-    std::vector<tf2::Transform> armors_to_cam;
-    for (size_t i = 0; i < indexes.size(); i++) {
-        armors_to_cam.emplace_back(
-            utils::convert_to<tf2::Quaternion>(rotations[i][indexes[i]]),
-            utils::convert_to<tf2::Vector3>(translations[i][indexes[i]])
-        );
-    }
-    return armors_to_cam;
+        return buffs_to_cam;
+    } else if (std::holds_alternative<std::vector<ArmorDetection>>(detections)) {
+        const auto& armor_detections = std::get<std::vector<ArmorDetection>>(detections);
+        if (armor_detections.size() != 1 && armor_detections.size() != 2) {
+            return {};
+        }
+
+        std::vector<std::array<cv::Mat, 2>> rvecs;
+        std::vector<std::array<cv::Mat, 2>> tvecs;
+        std::vector<std::array<float, 2>> reprojerrs;
+        solve_pnp_cv(armor_detections, rvecs, tvecs, reprojerrs);
+
+        std::vector<std::array<Eigen::Quaternionf, 2>> rotations;
+        std::vector<std::array<Eigen::Vector3f, 2>> translations;
+        cvcoord_to_tfcoord(rvecs, tvecs, rotations, translations);
+
+        if (armor_detections.size() == 1) {
+            if (lstm) {
+                const float dt = static_cast<float>(std::clamp(timestamp - lstm_prev_update_time_, 0.0, 10.0));
+                const auto refined_rotation = refine_solution_lstm(rotations[0], reprojerrs[0], dt, lstm);
+                lstm_prev_update_time_ = timestamp;
+                return {tf2::Transform(
+                    utils::convert_to<tf2::Quaternion>(refined_rotation),
+                    utils::convert_to<tf2::Vector3>(translations[0][0])
+                )};
+            } else {
+                const int index = select_solution_prior_angle(
+                    rotations[0],
+                    gimbal_ypr,
+                    defs::armor_pitch(static_cast<ArmorType>(armor_detections[0].label))
+                );
+                return {tf2::Transform(
+                    utils::convert_to<tf2::Quaternion>(rotations[0][index]),
+                    utils::convert_to<tf2::Vector3>(translations[0][index])
+                )};
+            }
+        } else if (armor_detections.size() == 2) {
+            const auto indices = select_solution_armors_relative_position(
+                {rotations[0], rotations[1]},
+                {translations[0], translations[1]}
+            );
+            return {
+                tf2::Transform(
+                    utils::convert_to<tf2::Quaternion>(rotations[0][indices[0]]),
+                    utils::convert_to<tf2::Vector3>(translations[0][indices[0]])
+                ),
+                tf2::Transform(
+                    utils::convert_to<tf2::Quaternion>(rotations[1][indices[1]]),
+                    utils::convert_to<tf2::Vector3>(translations[1][indices[1]])
+                )
+            };
+        }
+    }  
+    return {};
 }
 
 void PnPSolver::solve_pnp_cv(
-    const std::vector<hw_sentry_interfaces::msg::ArmorDetection>& detections,
+    const std::variant<std::vector<ArmorDetection>, std::vector<BuffDetection>>& detections,
     std::vector<std::array<cv::Mat, 2>>& rvecs,
     std::vector<std::array<cv::Mat, 2>>& tvecs,
     std::vector<std::array<float, 2>>& reprojerrs
 ) const {
-    std::for_each(detections.begin(), detections.end(), [&](const auto& detection) {
-        const ArmorLabel label = static_cast<ArmorLabel>(detection.label);
-        const auto& obj_pts = defs::is_big_armor(label) ? BIG_POINTS : SMALL_POINTS;
-        const std::array<cv::Point2f, 4> img_pts {
-            cv::Point2f {detection.tl.x, detection.tl.y},
-            cv::Point2f {detection.bl.x, detection.bl.y},
-            cv::Point2f {detection.br.x, detection.br.y},
-            cv::Point2f {detection.tr.x, detection.tr.y}
-        };
-        std::array<cv::Mat, 2> rvec, tvec;
-        std::array<float, 2> reprojerr;
-        cv::solvePnPGeneric(
-            obj_pts,
-            img_pts,
-            cam_intrinsic_,
-            cam_distortion_,
-            rvec,
-            tvec,
-            false,
-            cv::SOLVEPNP_IPPE,
-            cv::noArray(),
-            cv::noArray(),
-            reprojerr
-        );
-        rvecs.emplace_back(rvec);
-        tvecs.emplace_back(tvec);
-        reprojerrs.emplace_back(reprojerr);
-    });
+    if (std::holds_alternative<std::vector<BuffDetection>>(detections)) {
+        const auto& buff_detections = std::get<std::vector<BuffDetection>>(detections);
+        std::for_each(buff_detections.begin(), buff_detections.end(), [&](const auto& detection) {
+            const auto& obj_pts = BUFF_POINTS;
+            const std::array<cv::Point2f, 4> img_pts {
+                cv::Point2f {detection.t.x, detection.t.y},
+                cv::Point2f {detection.l.x, detection.l.y},
+                cv::Point2f {detection.b.x, detection.b.y},
+                cv::Point2f {detection.r.x, detection.r.y}
+            };
+            std::array<cv::Mat, 2> rvec, tvec;
+            std::array<float, 2> reprojerr;
+            cv::solvePnPGeneric(
+                obj_pts,
+                img_pts,
+                cam_intrinsic_,
+                cam_distortion_,
+                rvec,
+                tvec,
+                false,
+                cv::SOLVEPNP_IPPE,
+                cv::noArray(),
+                cv::noArray(),
+                reprojerr
+            );
+            rvecs.emplace_back(rvec);
+            tvecs.emplace_back(tvec);
+            reprojerrs.emplace_back(reprojerr);
+        });
+    } else if (std::holds_alternative<std::vector<ArmorDetection>>(detections)) {
+        const auto& armor_detections = std::get<std::vector<ArmorDetection>>(detections);
+        std::for_each(armor_detections.begin(), armor_detections.end(), [&](const auto& detection) {
+            const ArmorType label = static_cast<ArmorType>(detection.label);
+            const auto& obj_pts = defs::is_big_armor(label) ? BIG_POINTS : SMALL_POINTS;
+            const std::array<cv::Point2f, 4> img_pts {
+                cv::Point2f {detection.tl.x, detection.tl.y},
+                cv::Point2f {detection.bl.x, detection.bl.y},
+                cv::Point2f {detection.br.x, detection.br.y},
+                cv::Point2f {detection.tr.x, detection.tr.y}
+            };
+            std::array<cv::Mat, 2> rvec, tvec;
+            std::array<float, 2> reprojerr;
+            cv::solvePnPGeneric(
+                obj_pts,
+                img_pts,
+                cam_intrinsic_,
+                cam_distortion_,
+                rvec,
+                tvec,
+                false,
+                cv::SOLVEPNP_IPPE,
+                cv::noArray(),
+                cv::noArray(),
+                reprojerr
+            );
+            rvecs.emplace_back(rvec);
+            tvecs.emplace_back(tvec);
+            reprojerrs.emplace_back(reprojerr);
+        });
+    }
 }
 
 void PnPSolver::cvcoord_to_tfcoord(
@@ -97,8 +163,8 @@ void PnPSolver::cvcoord_to_tfcoord(
     std::vector<std::array<Eigen::Vector3f, 2>>& translations
 ) const {
     const size_t len = rvecs.size();
-    rotations.reserve(len);
-    translations.reserve(len);
+    rotations.resize(len);
+    translations.resize(len);
     for (size_t i = 0; i < len; i++) {
         // 左乘即可把opencv的相机系（右x，下y，前z）转成我们在tf2中的相机系（前x，左y，上z）
         const Eigen::Quaternionf cv_to_tf(-0.5, 0.5, -0.5, 0.5);
@@ -112,23 +178,28 @@ void PnPSolver::cvcoord_to_tfcoord(
     }
 }
 
-int PnPSolver::select_solution_lstm(
+Eigen::Quaternionf PnPSolver::refine_solution_lstm(
     const std::array<Eigen::Quaternionf, 2>& rotations,
     const std::array<float, 2>& reprojerrs,
     const float dt,
     const std::shared_ptr<LSTMPoseSmoothing> lstm
 ) const {
-    const auto yaw0 = std::get<0>(utils::to_euler_ypr(rotations[0]));
-    const auto yaw1 = std::get<0>(utils::to_euler_ypr(rotations[1]));
-    const float result = lstm->infer(yaw0, yaw1, reprojerrs[0], reprojerrs[1], dt);
-    const float diff0 = std::abs(result - yaw0);
-    const float diff1 = std::abs(result - yaw1);
-    return diff0 > diff1;
+    const auto ypr0 = utils::to_euler_ypr(rotations[0]);
+    const auto ypr1 = utils::to_euler_ypr(rotations[1]);
+    const auto yaw0 = std::get<0>(ypr0);
+    const auto yaw1 = std::get<0>(ypr1);
+    const float pred_yaw = lstm->infer(yaw0, yaw1, reprojerrs[0], reprojerrs[1], dt);
+    const float diff0 = std::abs(pred_yaw - yaw0);
+    const float diff1 = std::abs(pred_yaw - yaw1);
+    const auto refined_rotation =
+        Eigen::AngleAxisf(diff0 < diff1 ? std::get<2>(ypr0) : std::get<2>(ypr1), Eigen::Vector3f::UnitX())
+        * Eigen::AngleAxisf(diff0 < diff1 ? std::get<1>(ypr0) : std::get<1>(ypr1), Eigen::Vector3f::UnitY())
+        * Eigen::AngleAxisf(pred_yaw, Eigen::Vector3f::UnitZ());
+    return Eigen::Quaternionf(refined_rotation);
 }
 
 int PnPSolver::select_solution_prior_angle(
     const std::array<Eigen::Quaternionf, 2>& rotations,
-    const std::array<float, 2>& reprojerrs,
     const std::tuple<float, float, float>& gimbal_ypr,
     const float prior_pitch
 ) const {
@@ -146,22 +217,14 @@ int PnPSolver::select_solution_prior_angle(
             utils::to_euler_ypr(utils::convert_to<tf2::Quaternion>(corrected_rotation));
     }
 
-    std::array<float, 2> reproj_errs = reprojerrs;
-    const auto normalize = [](std::array<float, 2>& arr) {
-        const float sum = arr[0] + arr[1];
-        std::for_each(arr.begin(), arr.end(), [&](float& v) { v /= sum; });
-    };
-    normalize(reproj_errs);
-
     std::array<float, 2> prior_angle_diff;
     for (unsigned i = 0; i < 2; i++) {
         prior_angle_diff[i] =
             std::abs(std::get<1>(corrected_ypr[i]) - prior_pitch)
             + std::abs(std::get<2>(corrected_ypr[i]));
     }
-    normalize(prior_angle_diff);
 
-    return (reproj_errs[0] + prior_angle_diff[0]) > (reproj_errs[1] + prior_angle_diff[1]);
+    return prior_angle_diff[0] > prior_angle_diff[1];
 }
 
 std::array<int, 2> PnPSolver::select_solution_armors_relative_position(

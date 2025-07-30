@@ -203,8 +203,6 @@ void RecorderNode::draw_info_on_img(const PredictorStatus::SharedPtr msg, cv::Ma
     using namespace std;
     using namespace cv;
     using namespace Eigen;
-    const string COLOR_MAP[3] = {"B", "R", "G"};
-    const string LABEL_MAP[6] = {"S", "1", "2", "3", "4", "O"};
     const string STATUS_MAP[4] = {"CONVERGING", "TRACKING", "TEMP_LOST", "LOST"};
     const Scalar WHITE(255, 255, 255);
     const Scalar BLUE(255, 0, 0);
@@ -223,16 +221,16 @@ void RecorderNode::draw_info_on_img(const PredictorStatus::SharedPtr msg, cv::Ma
     std::sprintf(buf, "T: %.2lf", to_sec(msg->header.stamp) - start_time_);
     text_left_align(img, buf, Point(0, 10), WHITE);
 
-    // 右上角画目标装甲板编号
-    std::sprintf(buf, "%2d", msg->label);
-    text_left_align(img, buf, Point(500, 10), WHITE);
-
     // 右上角画tracker_status
     const auto status_color = (msg->tracker_status == 0 ? WHITE : (msg->tracker_status == 1 ? GREEN : RED));
     text_middle_align(img, STATUS_MAP[msg->tracker_status], Point(590, 10), status_color);
 
-    // 左下角画跟踪器具体信息
-    if (msg->tracker_status != 3) {
+    if (msg->mode == 0 && msg->tracker_status != 3) {
+        // 右上角画目标装甲板编号
+        std::sprintf(buf, "%2d", msg->label);
+        text_left_align(img, buf, Point(500, 10), WHITE);
+
+        // 左下角画装甲板跟踪器具体信息
         std::sprintf(
             buf,
             "Center: (%3.0f, %3.0f, %3.0f) += (%3.0f, %3.0f, %3.0f)",

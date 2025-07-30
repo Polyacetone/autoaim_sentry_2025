@@ -32,13 +32,13 @@ private:
     Eigen::Vector3f calc_center(
         const rclcpp::Time& time,
         const std::vector<ArmorDetection>& detections,
-        const ArmorLabel label
+        const ArmorType label
     ) const;
 
     float car_radius_;
 
-    ArmorColor target_color_ = ArmorColor::NONE;
-    ArmorLabel current_aiming_label_ = ArmorLabel::NONE;
+    ColorType target_color_ = ColorType::NONE;
+    ArmorType current_aiming_label_ = ArmorType::NONE;
     geometry_msgs::msg::Point32 current_aiming_center_;
     std::unique_ptr<PnPSolver> pnp_solver_;
     std::unique_ptr<TrackerStatus> car_status_[10];
@@ -68,7 +68,7 @@ SendEnemyNode::SendEnemyNode(const rclcpp::NodeOptions& options): Node("autoaim_
         car_status_[i] = std::make_unique<TrackerStatus>(max_temp_lost_frames, max_converging_frames);
     }
 
-    target_color_ = static_cast<ArmorColor>(declare_parameter<int>("default_target_color"));
+    target_color_ = static_cast<ColorType>(declare_parameter<int>("default_target_color"));
     std::string detections_sub_topic = declare_parameter<std::string>("detections_topic");
     std::string camera_info_sub_topic = declare_parameter<std::string>("camera_info_topic");
     std::string robot_color_sub_topic = declare_parameter<std::string>("robot_color_topic");
@@ -89,8 +89,8 @@ SendEnemyNode::SendEnemyNode(const rclcpp::NodeOptions& options): Node("autoaim_
         robot_color_sub_topic,
         rclcpp::QoS(1),
         [&](const RobotColor::SharedPtr msg) {
-            const ArmorColor robot_color = static_cast<ArmorColor>(msg->robot_color);
-            target_color_ = (robot_color == ArmorColor::BLUE) ? ArmorColor::RED : ArmorColor::BLUE;
+            const ColorType robot_color = static_cast<ColorType>(msg->robot_color);
+            target_color_ = (robot_color == ColorType::BLUE) ? ColorType::RED : ColorType::BLUE;
         }
     );
     predictor_status_sub_ = create_subscription<PredictorStatus>(
@@ -105,13 +105,13 @@ SendEnemyNode::SendEnemyNode(const rclcpp::NodeOptions& options): Node("autoaim_
 }
 
 void SendEnemyNode::detections_callback(const Detections::SharedPtr msg) {
-    std::unordered_map<ArmorLabel, std::vector<ArmorDetection>> map;
+    std::unordered_map<ArmorType, std::vector<ArmorDetection>> map;
     if (static_cast<AutoaimMode>(msg->mode) != AutoaimMode::ARMOR) return;
     std::for_each(
         msg->armor_detections.begin(), msg->armor_detections.end(),
         [&](const auto& detection) {
-            if (static_cast<ArmorColor>(detection.color) == target_color_) {
-                map[static_cast<ArmorLabel>(detection.label)].emplace_back(detection);
+            if (static_cast<ColorType>(detection.color) == target_color_) {
+                map[static_cast<ArmorType>(detection.label)].emplace_back(detection);
             }
         }
     );
@@ -119,10 +119,15 @@ void SendEnemyNode::detections_callback(const Detections::SharedPtr msg) {
     enemy_position.header.frame_id = "map";
     enemy_position.header.stamp = msg->header.stamp;
     enemy_position.enemy_color = static_cast<int>(target_color_);
-    for (int i = static_cast<int>(ArmorLabel::SENTRY); i <= static_cast<int>(ArmorLabel::BASE); i++) {
-        const ArmorLabel label = static_cast<ArmorLabel>(i);
+    for (int i = static_cast<int>(ArmorType::SENTRY); i <= static_cast<int>(ArmorType::BASE); i++) {
+        const ArmorType label = static_cast<ArmorType>(i);
+        if (label == current_aiming_label_) {
+            enemy_position.enemy_label.emplace_back(static_cast<int>(label));
+            enemy_position.enemy_position.emplace_back(current_aiming_center_);
+        }
         // 更新状态机和惯性滤波器
         if (map[label].size() == 1 || map[label].size() == 2) {
+            car_status_[static_cast<int>(label)]->update(true);
             Eigen::Vector3f center = calc_center(msg->header.stamp, map[label], label);
             if (center == Eigen::Vector3f(0, 0, 0)) continue;
             if (car_status_[static_cast<int>(label)]->status() == StatusType::LOST) {
@@ -130,23 +135,20 @@ void SendEnemyNode::detections_callback(const Detections::SharedPtr msg) {
             } else {
                 emaf_center_[static_cast<int>(label)]->update(center);
             }
-            car_status_[static_cast<int>(label)]->update(true);
         } else {
             car_status_[static_cast<int>(label)]->update(false);
         }
         // 填充enemy_position
-        if (label == current_aiming_label_) {
-            enemy_position.enemy_label.emplace_back(static_cast<int>(label));
-            enemy_position.enemy_position.emplace_back(current_aiming_center_);
-        } else if (
-            car_status_[static_cast<int>(label)]->status() == StatusType::TRACKING ||
-            car_status_[static_cast<int>(label)]->status() == StatusType::TEMP_LOST) {
-            enemy_position.enemy_label.emplace_back(static_cast<int>(label));
-            enemy_position.enemy_position.emplace_back(
-                utils::convert_to<geometry_msgs::msg::Point32>(
-                    emaf_center_[static_cast<int>(label)]->value()
-                )
-            );
+        if (label != current_aiming_label_) {
+            if (car_status_[static_cast<int>(label)]->status() == StatusType::TRACKING ||
+                car_status_[static_cast<int>(label)]->status() == StatusType::TEMP_LOST) {
+                enemy_position.enemy_label.emplace_back(static_cast<int>(label));
+                enemy_position.enemy_position.emplace_back(
+                    utils::convert_to<geometry_msgs::msg::Point32>(
+                        emaf_center_[static_cast<int>(label)]->value()
+                    )
+                );
+            }
         }
     }
     enemy_position_pub_->publish(enemy_position);
@@ -154,22 +156,22 @@ void SendEnemyNode::detections_callback(const Detections::SharedPtr msg) {
 
 void SendEnemyNode::predictor_status_callback(const PredictorStatus::SharedPtr msg) {
     if (static_cast<AutoaimMode>(msg->mode) != AutoaimMode::ARMOR || msg->header.frame_id != "map") {
-        current_aiming_label_ = ArmorLabel::NONE;
+        current_aiming_label_ = ArmorType::NONE;
         return;
     }
     const StatusType tracker_status = static_cast<StatusType>(msg->tracker_status);
     if (tracker_status == StatusType::TRACKING || tracker_status == StatusType::TEMP_LOST) {
-        current_aiming_label_ = static_cast<ArmorLabel>(msg->label);
+        current_aiming_label_ = static_cast<ArmorType>(msg->label);
         current_aiming_center_ = utils::convert_to<geometry_msgs::msg::Point32>(msg->center);
     } else {
-        current_aiming_label_ = ArmorLabel::NONE;
+        current_aiming_label_ = ArmorType::NONE;
     }
 }
 
 Eigen::Vector3f SendEnemyNode::calc_center(
     const rclcpp::Time& time,
     const std::vector<ArmorDetection>& detections,
-    const ArmorLabel label
+    const ArmorType label
 ) const {
     tf2::Transform cam_to_chassis;
     if (!utils::try_lookup_tf(

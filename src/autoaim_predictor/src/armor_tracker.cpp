@@ -149,8 +149,9 @@ CarObserver::CarObserver(const cv::FileNode& fn) {
     DELTA_YAW_UPDATE_THRESHOLD = static_cast<float>(fn["delta_yaw_update_threshold"]);
     ENTER_ANTISPIN_PALSTANCE = static_cast<float>(fn["enter_antispin_palstance"]);
     EXIT_ANTISPIN_PALSTANCE = static_cast<float>(fn["exit_antispin_palstance"]);
-    ANTISPIN_FOLLOW_ANGLE = static_cast<float>(fn["antispin_follow_angle"]);
     ANTISPIN_SHOOT_ANGLE = static_cast<float>(fn["antispin_shoot_angle"]);
+    ANTISPIN_OUT_OF_SHOOT_ANGLE_THRESHOLD = static_cast<int>(fn["antispin_out_of_shoot_angle_threshold"]);
+    ANTISPIN_IN_SHOOT_ANGLE_THRESHOLD = static_cast<int>(fn["antispin_in_shoot_angle_threshold"]);
     float radius_filter_ratio = static_cast<float>(fn["radius_filter_ratio"]);
     float height_filter_ratio = static_cast<float>(fn["height_filter_ratio"]);
     float axis_filter_ratio = static_cast<float>(fn["axis_filter_ratio"]);
@@ -170,6 +171,7 @@ void CarObserver::reset() {
     main_observing_armor_id_ = 0;
     accumulated_yaw_ = 0;
     prev_main_observing_yaw_ = 0;
+    out_of_shoot_angle_count_ = 0;
     for (int i = 0; i < 4; i++) {
         height_[i]->reset();
         radius_[i]->reset();
@@ -343,7 +345,7 @@ float CarObserver::predict_img_to_hit_time(
 std::tuple<Vector3f, bool> CarObserver::predict_shoot_pos(
     const float gimbal_yaw_to_basis,
     const float img_to_hit_time
-) const {
+) {
     const Vector3f pred_car_center =
         kf_center_->value() + kf_center_->derivative() * img_to_hit_time;
     // 0号装甲板在basis系下的预测yaw角
@@ -364,7 +366,15 @@ std::tuple<Vector3f, bool> CarObserver::predict_shoot_pos(
             target_armor_id = i;
         }
     }
-    if (abs(target_angle_to_gimbal) < ANTISPIN_FOLLOW_ANGLE) { // 跟随射击
+    if (abs(target_angle_to_gimbal) > ANTISPIN_SHOOT_ANGLE) {
+        out_of_shoot_angle_count_++;
+        in_shoot_angle_count_ = 0;
+    } else {
+        out_of_shoot_angle_count_ = 0;
+        in_shoot_angle_count_++;
+    }
+    if (out_of_shoot_angle_count_ < ANTISPIN_OUT_OF_SHOOT_ANGLE_THRESHOLD
+        && in_shoot_angle_count_ > ANTISPIN_IN_SHOOT_ANGLE_THRESHOLD) { // 跟随射击
         // 最面向我们的装甲板在basis下的预测yaw角
         const float target_angle_to_basis =
             utils::rad_period_correction(target_angle_to_gimbal + gimbal_yaw_to_basis);
@@ -375,11 +385,10 @@ std::tuple<Vector3f, bool> CarObserver::predict_shoot_pos(
             radius_[target_armor_id]->value().value(),
             target_angle_to_basis
         );
-        const bool shoot_flag = std::abs(target_angle_to_gimbal) < ANTISPIN_SHOOT_ANGLE;
-        return {target, shoot_flag};
+        return {target, true};
     } else { // 去下一块装甲板出现位置准备射击
         const float next_target_angle_to_basis = utils::rad_period_correction(
-            (kf_yaw_->value().value() > 0 ? -1 : 1) * ANTISPIN_FOLLOW_ANGLE
+            (kf_yaw_->value().value() > 0 ? -1 : 1) * ANTISPIN_SHOOT_ANGLE
             + gimbal_yaw_to_basis
         );
         // 这里要直接用target_armor_id而不是下一块的id取radius和height
@@ -468,8 +477,9 @@ OutpostObserver::OutpostObserver(const cv::FileNode& fn) {
     RADIUS = static_cast<float>(fn["radius"]);
     SWITCH_ARMOR_ANGLE = static_cast<float>(fn["switch_armor_angle"]);
     DELTA_YAW_UPDATE_THRESHOLD = static_cast<float>(fn["delta_yaw_update_threshold"]);
-    OUTPOST_FOLLOW_ANGLE = static_cast<float>(fn["outpost_follow_angle"]);
-    OUTPOST_CAN_SHOOT_ANGLE = static_cast<float>(fn["outpost_can_shoot_angle"]);
+    OUTPOST_SHOOT_ANGLE = static_cast<float>(fn["outpost_shoot_angle"]);
+    OUTPOST_OUT_OF_SHOOT_ANGLE_THRESHOLD = static_cast<int>(fn["outpost_out_of_shoot_angle_threshold"]);
+    OUTPOST_IN_SHOOT_ANGLE_THRESHOLD = static_cast<int>(fn["outpost_in_shoot_angle_threshold"]);
     kf_center_ = std::make_unique<KF<3>>(fn["kf_center"]);
     kf_yaw_ = std::make_unique<KF<1>>(fn["kf_yaw"]);
     reset();
@@ -535,7 +545,7 @@ float OutpostObserver::predict_img_to_hit_time(
 std::tuple<Vector3f, bool> OutpostObserver::predict_shoot_pos(
     const float gimbal_yaw_to_basis,
     const float img_to_hit_time
-) const {
+) {
     const Vector3f pred_car_center =
         kf_center_->value() + kf_center_->derivative() * img_to_hit_time;
     // 0号装甲板在basis系下的预测yaw角
@@ -554,7 +564,15 @@ std::tuple<Vector3f, bool> OutpostObserver::predict_shoot_pos(
             target_angle_to_gimbal = pred_angle_to_gimbal;
         }
     }
-    if (abs(target_angle_to_gimbal) < OUTPOST_FOLLOW_ANGLE) { // 跟随射击
+    if (abs(target_angle_to_gimbal) > OUTPOST_SHOOT_ANGLE) {
+        out_of_shoot_angle_count_++;
+        in_shoot_angle_count_ = 0;
+    } else {
+        out_of_shoot_angle_count_ = 0;
+        in_shoot_angle_count_++;
+    }
+    if (out_of_shoot_angle_count_ < OUTPOST_OUT_OF_SHOOT_ANGLE_THRESHOLD
+        && in_shoot_angle_count_ > OUTPOST_IN_SHOOT_ANGLE_THRESHOLD) { // 跟随射击
         // 最面向我们的装甲板在basis下的预测yaw角
         const float target_angle_to_basis =
             utils::rad_period_correction(target_angle_to_gimbal + gimbal_yaw_to_basis);
@@ -565,11 +583,10 @@ std::tuple<Vector3f, bool> OutpostObserver::predict_shoot_pos(
             RADIUS,
             target_angle_to_basis
         );
-        const bool shoot_flag = std::abs(target_angle_to_gimbal) < OUTPOST_CAN_SHOOT_ANGLE;
-        return {target, shoot_flag};
+        return {target, true};
     } else { // 去下一块装甲板出现位置准备射击
         const float next_target_angle_to_basis = utils::rad_period_correction(
-            (kf_yaw_->value().value() > 0 ? -1 : 1) * OUTPOST_FOLLOW_ANGLE
+            (kf_yaw_->value().value() > 0 ? -1 : 1) * OUTPOST_SHOOT_ANGLE
             + gimbal_yaw_to_basis
         );
         // 这里要直接用target_armor_id而不是下一块的id取radius和height
@@ -623,7 +640,7 @@ void OutpostObserver::write_predictor_status(hw_sentry_interfaces::msg::Predicto
         status.radius.emplace_back(RADIUS);
         status.height.emplace_back(0);
     }
-    status.axis = utils::convert_to<geometry_msgs::msg::Point32>(Eigen::Vector3f(0, 0, 1));
+    status.axis = utils::convert_to<geometry_msgs::msg::Point32>(Vector3f(0, 0, 1));
     status.center = utils::convert_to<geometry_msgs::msg::Point32>(kf_center_->value());
     status.velocity = utils::convert_to<geometry_msgs::msg::Point32>(kf_center_->derivative());
     status.yaw = kf_yaw_->value().value();
@@ -655,7 +672,7 @@ ArmorTracker::ArmorTracker(const cv::FileNode& fn) {
 }
 
 StatusType ArmorTracker::status() const {
-    if (target_label_ == ArmorLabel::OUTPOST) {
+    if (target_label_ == ArmorType::OUTPOST) {
         return outpost_status_->status();
     } else {
         return car_status_->status();
@@ -680,7 +697,7 @@ void ArmorTracker::reset() {
     kf_armor_avg_err_ = car_avg_err_ = 0;
 }
 
-void ArmorTracker::set_target_label(ArmorLabel label) {
+void ArmorTracker::set_target_label(ArmorType label) {
     if (target_label_ != label) {
         reset();
         target_label_ = label;
@@ -691,7 +708,7 @@ void ArmorTracker::update(const double timestamp) {
     current_update_time_ = timestamp;
     bool is_valid = (pushed_armors_.size() == 1 || pushed_armors_.size() == 2);
     // 更新状态机，状态机会根据状态调用跟踪器的更新
-    if (target_label_ == ArmorLabel::OUTPOST) outpost_status_->update(is_valid);
+    if (target_label_ == ArmorType::OUTPOST) outpost_status_->update(is_valid);
     else car_status_->update(is_valid);
     // 统计单独装甲板预测以及整车预测的历史误差
     if (is_valid) update_pred_accuracy();
@@ -702,7 +719,7 @@ void ArmorTracker::update(const double timestamp) {
 void ArmorTracker::status_change_handler(StatusType from, StatusType to) {
     if (from == StatusType::LOST && to == StatusType::CONVERGING) { // 初始化
         kf_main_observing_armor_->initialize(pushed_armors_[0].translation);
-        if (target_label_ == ArmorLabel::OUTPOST) {
+        if (target_label_ == ArmorType::OUTPOST) {
             outpost_observer_->initialize(pushed_armors_);
         } else {
             car_observer_->initialize(pushed_armors_);
@@ -714,14 +731,14 @@ void ArmorTracker::status_remain_handler(StatusType current) {
     if (current != StatusType::LOST) { // 预测
         const float time_elapsed = static_cast<float>(current_update_time_ - prev_update_time_);
         kf_main_observing_armor_->predict(time_elapsed);
-        if (target_label_ == ArmorLabel::OUTPOST) {
+        if (target_label_ == ArmorType::OUTPOST) {
             outpost_observer_->predict(time_elapsed);
         } else {
             car_observer_->predict(time_elapsed);
         }
     }
     if (current == StatusType::CONVERGING || current == StatusType::TRACKING) { // 更新
-        if (target_label_ == ArmorLabel::OUTPOST) {
+        if (target_label_ == ArmorType::OUTPOST) {
             outpost_observer_->update(pushed_armors_);
         } else {
             car_observer_->update(pushed_armors_);
@@ -822,7 +839,7 @@ std::tuple<Vector3f, bool> ArmorTracker::predict_shoot_pos(
     const Vector3f fric_to_basis,
     const float gimbal_yaw_to_basis
 ) {
-    if (target_label_ == ArmorLabel::OUTPOST) {
+    if (target_label_ == ArmorType::OUTPOST) {
         const float img_to_hit_time =
             outpost_observer_->predict_img_to_hit_time(bullet_speed, img_to_fire_time, fric_to_basis);
         return outpost_observer_->predict_shoot_pos(gimbal_yaw_to_basis, img_to_hit_time);
@@ -858,7 +875,7 @@ void ArmorTracker::print_colored_status_info() const {
     const auto print_vec = [](const char* format, Vector3f vec) {
         std::printf(format, vec.x(), vec.y(), vec.z());
     };
-    if (target_label_ == ArmorLabel::OUTPOST) {
+    if (target_label_ == ArmorType::OUTPOST) {
         outpost_status_->print_colored_status_info();
     } else {
         car_status_->print_colored_status_info();
@@ -866,12 +883,12 @@ void ArmorTracker::print_colored_status_info() const {
     std::cout << termcolor::bold << "MainArmor   " << termcolor::reset;
     print_vec("[% 4.0f, % 4.0f, % 4.0f] += ", kf_main_observing_armor_->value() * 100);
     print_vec("[% 4.0f, % 4.0f, % 4.0f]\n", kf_main_observing_armor_->derivative() * 100);
-    if (target_label_ == ArmorLabel::OUTPOST) {
+    if (target_label_ == ArmorType::OUTPOST) {
         outpost_observer_->print_colored_status_info();
     } else {
         car_observer_->print_colored_status_info();
     }
-    if (target_label_ != ArmorLabel::OUTPOST) {
+    if (target_label_ != ArmorType::OUTPOST) {
         std::cout << termcolor::bold << "MainArmorAvgErr " << termcolor::reset;
         std::printf("%4.1f", kf_armor_avg_err_ * 100);
         std::cout << std::endl;
@@ -885,7 +902,7 @@ void ArmorTracker::print_colored_status_info() const {
 }
 
 std::vector<std::tuple<Vector3f, Quaternionf>> ArmorTracker::get_all_armors() const {
-    if (target_label_ == ArmorLabel::OUTPOST) {
+    if (target_label_ == ArmorType::OUTPOST) {
         return outpost_observer_->get_all_armors();
     } else {
         return car_observer_->get_all_armors();
@@ -895,7 +912,7 @@ std::vector<std::tuple<Vector3f, Quaternionf>> ArmorTracker::get_all_armors() co
 void ArmorTracker::write_predictor_status(hw_sentry_interfaces::msg::PredictorStatus& status) const {
     status.mode = static_cast<int>(AutoaimMode::ARMOR);
     status.label = static_cast<int>(target_label_);
-    if (target_label_ == ArmorLabel::OUTPOST) {
+    if (target_label_ == ArmorType::OUTPOST) {
         status.tracker_status = static_cast<int>(outpost_status_->status());
         outpost_observer_->write_predictor_status(status);
     } else {

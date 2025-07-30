@@ -24,15 +24,15 @@ private:
     ) const;
 
     AutoaimMode default_mode_;
-    std::vector<ArmorLabel> default_target_label_priority_;
+    std::vector<ArmorType> default_target_label_priority_;
     float decision_fallback_timeout_;
     unsigned current_target_max_lost_frames_, switch_new_target_appear_frames_;
     float big_armor_length_height_threshold_, small_armor_length_height_threshold_;
     
-    ArmorLabel target_label_ = ArmorLabel::NONE;
-    ArmorColor target_color_;
+    ArmorType target_label_ = ArmorType::NONE;
+    ColorType enemy_color_, robot_color_;
     AutoaimMode mode_;
-    std::vector<ArmorLabel> target_label_priority_;
+    std::vector<ArmorType> target_label_priority_;
     double last_recv_decision_time_ = 0;
 
     unsigned current_target_lost_frames_ = 0;
@@ -56,10 +56,11 @@ SelectorNode::SelectorNode(const rclcpp::NodeOptions& options): Node("autoaim_se
     std::transform(
         default_target_label_priority.begin(), default_target_label_priority.end(),
         std::back_inserter(default_target_label_priority_),
-        [](const auto& v) { return static_cast<ArmorLabel>(v); }
+        [](const auto& v) { return static_cast<ArmorType>(v); }
     );
     target_label_priority_ = default_target_label_priority_;
-    target_color_ = static_cast<ArmorColor>(declare_parameter<int>("default_target_color"));
+    robot_color_ = static_cast<ColorType>(declare_parameter<int>("default_robot_color"));
+    enemy_color_ = (robot_color_ == ColorType::BLUE) ? ColorType::RED : ColorType::BLUE;
     decision_fallback_timeout_ = declare_parameter<float>("decision_fallback_timeout");
     current_target_max_lost_frames_ = declare_parameter<int>("current_target_max_lost_frames");
     switch_new_target_appear_frames_ = declare_parameter<int>("switch_new_target_appear_frames");
@@ -81,8 +82,8 @@ SelectorNode::SelectorNode(const rclcpp::NodeOptions& options): Node("autoaim_se
         robot_color_sub_topic,
         rclcpp::QoS(1),
         [&](const RobotColor::SharedPtr msg) {
-            const ArmorColor robot_color = static_cast<ArmorColor>(msg->robot_color);
-            target_color_ = (robot_color == ArmorColor::BLUE) ? ArmorColor::RED : ArmorColor::BLUE;
+            robot_color_ = static_cast<ColorType>(msg->robot_color);
+            enemy_color_ = (robot_color_ == ColorType::BLUE) ? ColorType::RED : ColorType::BLUE;
         }
     );
     target_enemy_sub_ = create_subscription<TargetEnemy>(
@@ -94,7 +95,7 @@ SelectorNode::SelectorNode(const rclcpp::NodeOptions& options): Node("autoaim_se
             std::transform(
                 msg->label.begin(), msg->label.end(),
                 std::back_inserter(target_label_priority_),
-                [](const auto& v) { return static_cast<ArmorLabel>(v); }
+                [](const auto& v) { return static_cast<ArmorType>(v); }
             );
             last_recv_decision_time_ = now().seconds();
         }
@@ -125,8 +126,17 @@ void SelectorNode::detections_callback(const Detections::SharedPtr msg) {
         decide_target_label(msg->armor_detections);
         selected_detections.label = static_cast<int>(target_label_);
         select_armors(msg->armor_detections, selected_detections.armor_detections);
-        selected_detections_pub_->publish(selected_detections);
+    } else if (mode_ == AutoaimMode::SMALL_BUFF || mode_ == AutoaimMode::BIG_BUFF) {
+        std::copy_if(
+            msg->buff_detections.begin(), msg->buff_detections.end(),
+            std::back_inserter(selected_detections.buff_detections),
+            [&](const auto& detection) -> bool {
+                return static_cast<ColorType>(detection.color) == robot_color_
+                    && static_cast<BuffType>(detection.label) == BuffType::INACTIVATE;
+            }
+        );
     }
+    selected_detections_pub_->publish(selected_detections);
 }
 
 void SelectorNode::decide_target_label(const std::vector<ArmorDetection>& armors) {
@@ -145,16 +155,16 @@ void SelectorNode::decide_target_label(const std::vector<ArmorDetection>& armors
             }
         }
     }
-    if (target_label_ != ArmorLabel::NONE) {
-        if (!occurred_armors[static_cast<int>(target_color_)][static_cast<int>(target_label_)]) {
+    if (target_label_ != ArmorType::NONE) {
+        if (!occurred_armors[static_cast<int>(enemy_color_)][static_cast<int>(target_label_)]) {
             current_target_lost_frames_++;
         } else {
             current_target_lost_frames_ = 0;
         }
     }
     if (!target_label_priority_.empty()) {
-        for (const ArmorLabel label: target_label_priority_) {
-            if (label == ArmorLabel::NONE) continue;
+        for (const ArmorType label: target_label_priority_) {
+            if (label == ArmorType::NONE) continue;
             if (label == target_label_) {
                 if (!is_enemy_dead_[static_cast<int>(label)] &&
                     !is_enemy_invincible_[static_cast<int>(label)] &&
@@ -164,7 +174,7 @@ void SelectorNode::decide_target_label(const std::vector<ArmorDetection>& armors
             } else {
                 if (!is_enemy_dead_[static_cast<int>(label)] &&
                     !is_enemy_invincible_[static_cast<int>(label)] &&
-                    armor_appear_frames_[static_cast<int>(target_color_)][static_cast<int>(label)] > switch_new_target_appear_frames_) {
+                    armor_appear_frames_[static_cast<int>(enemy_color_)][static_cast<int>(label)] > switch_new_target_appear_frames_) {
                     target_label_ = label;
                     current_target_lost_frames_ = 0;
                     return;
@@ -172,7 +182,7 @@ void SelectorNode::decide_target_label(const std::vector<ArmorDetection>& armors
             }
         }
     }
-    target_label_ = ArmorLabel::NONE;
+    target_label_ = ArmorType::NONE;
 }
 
 void SelectorNode::select_armors(
@@ -201,12 +211,12 @@ void SelectorNode::select_armors(
     // 筛选出目标颜色和标签的装甲板
     std::copy_if(src.begin(), src.end(), std::back_inserter(filtered),
         [&](const auto& armor) -> bool {
-            return static_cast<ArmorLabel>(armor.label) == target_label_ // 编号一样
+            return static_cast<ArmorType>(armor.label) == target_label_ // 编号一样
                 && get_length_height_ratio(armor) > (defs::is_big_armor(target_label_) // 过滤太斜的
                     ? big_armor_length_height_threshold_
                     : small_armor_length_height_threshold_)
-                && (static_cast<ArmorColor>(armor.color) == target_color_ // 颜色一样
-                    || (static_cast<ArmorColor>(armor.color) == ArmorColor::GRAY // 如果是被打成灰色的，即使颜色不一样也能进
+                && (static_cast<ColorType>(armor.color) == enemy_color_ // 颜色一样
+                    || (static_cast<ColorType>(armor.color) == ColorType::GRAY // 如果是被打成灰色的，即使颜色不一样也能进
                         && abs(get_center_x(armor) - center_x_prev) <= 15)); // 如果是灰色装甲板则根据和之前的位置差异判断是否是同一个
         }
     );
@@ -249,13 +259,13 @@ void SelectorNode::select_armors(
 void SelectorNode::comp_robots_hp_callback(const CompRobotsHp::SharedPtr msg) {
     constexpr float INVINCIBLE_TIME = 10;
     int enemy_hp[5] = {};
-    if (target_color_ == ArmorColor::RED) {
+    if (enemy_color_ == ColorType::RED) {
         enemy_hp[0] = msg->red_7_robot_hp;
         enemy_hp[1] = msg->red_1_robot_hp;
         enemy_hp[2] = msg->red_2_robot_hp;
         enemy_hp[3] = msg->red_3_robot_hp;
         enemy_hp[4] = msg->red_4_robot_hp;
-    } else if (target_color_ == ArmorColor::BLUE) {
+    } else if (enemy_color_ == ColorType::BLUE) {
         enemy_hp[0] = msg->blue_7_robot_hp;
         enemy_hp[1] = msg->blue_1_robot_hp;
         enemy_hp[2] = msg->blue_2_robot_hp;

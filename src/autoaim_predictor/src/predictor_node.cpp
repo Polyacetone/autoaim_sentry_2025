@@ -17,6 +17,7 @@
 #include <autoaim_common_utils/math_utils.hpp>
 #include <autoaim_common_definitions/common_definitions.hpp>
 #include <autoaim_predictor/armor_tracker.hpp>
+#include <autoaim_predictor/buff_tracker.hpp>
 
 namespace autoaim_predictor {
 using namespace hw_sentry_interfaces::msg;
@@ -27,14 +28,19 @@ public:
 
 private:
     void poses_callback(const Poses::SharedPtr msg);
-    std::tuple<Eigen::Vector3f, bool> predict_target(const rclcpp::Time& img_time) const;
-    void send_shoot_pos(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, bool can_shoot) const;
+    std::tuple<Eigen::Vector3f, bool> predict_armor_target(const rclcpp::Time& img_time) const;
+    std::tuple<Eigen::Vector3f, bool> predict_buff_target(const rclcpp::Time& img_time) const;
+    void send_shoot_pos(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, int shoot_flag) const;
     void send_predictor_status(const std_msgs::msg::Header& header) const;
-    void send_visualization_marker(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, ArmorLabel label) const;
+    void send_visualization_marker(
+        const rclcpp::Time& timestamp,
+        const Eigen::Vector3f& target,
+        ArmorType label = ArmorType::NONE
+    ) const;
     std::vector<visualization_msgs::msg::Marker> construct_armor_markers(
         const rclcpp::Time& stamp,
         const std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>>& armors,
-        const ArmorLabel label
+        const ArmorType label
     ) const;
     visualization_msgs::msg::Marker construct_target_point_marker(
         const rclcpp::Time& stamp,
@@ -49,6 +55,7 @@ private:
     float shoot_compensate_pitch_, shoot_compensate_yaw_;
 
     std::unique_ptr<ArmorTracker> armor_tracker_;
+    std::unique_ptr<BuffTracker> buff_tracker_;
     std::string current_basis_frame_id;
 
     std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -67,8 +74,14 @@ PredictorNode::PredictorNode(const rclcpp::NodeOptions& options): Node("autoaim_
     std::string armor_tracker_params_path =
         ament_index_cpp::get_package_share_directory("autoaim_predictor")
         + "/config/armor_tracker_params.yaml";
-    cv::FileStorage fs(armor_tracker_params_path, cv::FileStorage::READ);
-    armor_tracker_ = std::make_unique<ArmorTracker>(fs["armor_tracker"]);
+    cv::FileStorage armor_fs(armor_tracker_params_path, cv::FileStorage::READ);
+    armor_tracker_ = std::make_unique<ArmorTracker>(armor_fs["armor_tracker"]);
+
+    std::string buff_tracker_params_path =
+        ament_index_cpp::get_package_share_directory("autoaim_predictor")
+        + "/config/buff_tracker_params.yaml";
+    cv::FileStorage buff_fs(buff_tracker_params_path, cv::FileStorage::READ);
+    buff_tracker_ = std::make_unique<BuffTracker>(buff_fs["buff_tracker"]);
 
     enable_print_state_ = declare_parameter<bool>("enable_print_state");
     enable_visualization_marker_ = declare_parameter<bool>("enable_visualization_marker");
@@ -122,13 +135,15 @@ void PredictorNode::poses_callback(const Poses::SharedPtr msg) {
         }
         current_basis_frame_id = msg->header.frame_id;
         armor_tracker_->reset();
+        buff_tracker_->reset();
     }
     if (mode_ != mode) {
         mode_ = mode;
         armor_tracker_->reset();
+        buff_tracker_->reset();
     }
     if (mode_ == AutoaimMode::ARMOR) {
-        const ArmorLabel label = static_cast<ArmorLabel>(msg->label);
+        const ArmorType label = static_cast<ArmorType>(msg->label);
         armor_tracker_->set_target_label(label);
         for (const auto& armor_pose: msg->poses) {
             armor_tracker_->push(Armor(
@@ -139,9 +154,9 @@ void PredictorNode::poses_callback(const Poses::SharedPtr msg) {
         armor_tracker_->update(rclcpp::Time(msg->header.stamp).seconds());
         send_predictor_status(msg->header);
         if (armor_tracker_->status() == StatusType::LOST) return;
-        auto [target, can_shoot]= predict_target(msg->header.stamp);
+        auto [target, can_shoot]= predict_armor_target(msg->header.stamp);
         if (target != Eigen::Vector3f(0, 0, 0)) {
-            send_shoot_pos(msg->header.stamp, target, can_shoot);
+            send_shoot_pos(msg->header.stamp, target, can_shoot ? 2 : 0);
         }
         if (enable_print_state_) {
             armor_tracker_->print_colored_status_info();
@@ -150,10 +165,26 @@ void PredictorNode::poses_callback(const Poses::SharedPtr msg) {
         if (enable_visualization_marker_) {
             send_visualization_marker(msg->header.stamp, target, label);
         }
+    } else if (mode_ == AutoaimMode::SMALL_BUFF) {
+        buff_tracker_->set_mode(AutoaimMode::SMALL_BUFF);
+        for (const auto& buff_pose: msg->poses) {
+            buff_tracker_->push(Buff(utils::convert_to<tf2::Transform>(buff_pose)));
+        }
+        buff_tracker_->update(rclcpp::Time(msg->header.stamp).seconds());
+        send_predictor_status(msg->header);
+        if (buff_tracker_->status() == StatusType::LOST) return;
+        auto [target, can_shoot]= predict_buff_target(msg->header.stamp);
+        if (target != Eigen::Vector3f(0, 0, 0)) {
+            send_shoot_pos(msg->header.stamp, target, can_shoot ? 1 : 0);
+        }
+        if (enable_print_state_) {
+            buff_tracker_->print_colored_status_info();
+            std::cout << "(Basis frame id: " << current_basis_frame_id << ")" << std::endl;
+        }
     }
 }
 
-std::tuple<Eigen::Vector3f, bool> PredictorNode::predict_target(const rclcpp::Time& img_time) const {
+std::tuple<Eigen::Vector3f, bool> PredictorNode::predict_armor_target(const rclcpp::Time& img_time) const {
     tf2::Transform chassis_to_basis;
     if (current_basis_frame_id == "map") {
         if (!utils::try_lookup_tf(
@@ -214,15 +245,46 @@ std::tuple<Eigen::Vector3f, bool> PredictorNode::predict_target(const rclcpp::Ti
     auto target_to_fake_fric = fake_fric_to_bassis.inverse() * target_to_basis;
     return {
         utils::convert_to<Eigen::Vector3f>(target_to_fake_fric.getOrigin()),
-        can_shoot
+        can_shoot && armor_tracker_->status() != StatusType::CONVERGING
     };
 }
 
-void PredictorNode::send_shoot_pos(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, bool can_shoot) const {
+std::tuple<Eigen::Vector3f, bool> PredictorNode::predict_buff_target(const rclcpp::Time& img_time) const {
+    tf2::Transform fake_fric_to_gimbal_yaw;
+    if (!utils::try_lookup_tf(
+        tf_buffer_,
+        "gimbal_yaw",
+        "fake_fric",
+        img_time,
+        fake_fric_to_gimbal_yaw,
+        [&](const std::string& err) {
+            RCLCPP_WARN(get_logger(), "Failed to lookup fake_fric to gimbal_yaw: %s", err.c_str());
+        }
+    )) return {{Eigen::Vector3f(0, 0, 0)}, false};
+
+    auto [target_to_gimbal_yaw_translation, can_shoot] = buff_tracker_->predict_shoot_pos(
+        bullet_speed_,
+        now().seconds() - img_time.seconds() + control_to_fire_time_,
+        utils::convert_to<Eigen::Vector3f>(fake_fric_to_gimbal_yaw.getOrigin())
+    );
+
+    tf2::Transform target_to_gimbal_yaw(
+        {0, 0, 0, 1},
+        utils::convert_to<tf2::Vector3>(target_to_gimbal_yaw_translation)
+    );
+
+    auto target_to_fake_fric = fake_fric_to_gimbal_yaw.inverse() * target_to_gimbal_yaw;
+    return {
+        utils::convert_to<Eigen::Vector3f>(target_to_fake_fric.getOrigin()),
+        can_shoot && buff_tracker_->status() != StatusType::CONVERGING
+    };
+}
+
+void PredictorNode::send_shoot_pos(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, int shoot_flag) const {
     ShootPos shoot_pos;
     shoot_pos.header.frame_id = "fake_fric";
     shoot_pos.header.stamp = timestamp;
-    shoot_pos.shoot_flag = can_shoot ? 2 : 0;
+    shoot_pos.shoot_flag = shoot_flag;
     // 注意：发给电控的pitch是向上转为正。但我们在之前的计算中都是向下转为正
     shoot_pos.pitch = std::get<0>(trajectory::get_pitch_air_frac(
         std::hypot(target.x(), target.y()),
@@ -234,27 +296,29 @@ void PredictorNode::send_shoot_pos(const rclcpp::Time& timestamp, const Eigen::V
 }
 
 void PredictorNode::send_predictor_status(const std_msgs::msg::Header& header) const {
+    PredictorStatus predictor_status;
+    predictor_status.header = header;
     if (mode_ == AutoaimMode::ARMOR) {
-        PredictorStatus predictor_status;
-        predictor_status.header = header;
         armor_tracker_->write_predictor_status(predictor_status);
-        predictor_status_pub_->publish(predictor_status);
+    } else if (mode_ == AutoaimMode::SMALL_BUFF) {
+        buff_tracker_->write_predictor_status(predictor_status);
     }
+    predictor_status_pub_->publish(predictor_status);
 }
 
-void PredictorNode::send_visualization_marker(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, ArmorLabel label) const {
+void PredictorNode::send_visualization_marker(const rclcpp::Time& timestamp, const Eigen::Vector3f& target, ArmorType label) const {
+    visualization_msgs::msg::MarkerArray marker_arr;
     if (mode_ == AutoaimMode::ARMOR) {
-        visualization_msgs::msg::MarkerArray marker_arr;
         marker_arr.markers = construct_armor_markers(timestamp,armor_tracker_->get_all_armors(), label);
         marker_arr.markers.emplace_back(construct_target_point_marker(timestamp, target));
-        visualization_marker_pub_->publish(marker_arr);
     }
+    visualization_marker_pub_->publish(marker_arr);
 }
 
 std::vector<visualization_msgs::msg::Marker> PredictorNode::construct_armor_markers(
     const rclcpp::Time& stamp,
     const std::vector<std::tuple<Eigen::Vector3f, Eigen::Quaternionf>>& armors,
-    const ArmorLabel label
+    const ArmorType label
 ) const {
     std::vector<visualization_msgs::msg::Marker> markers;
     for (unsigned i = 0; i < armors.size(); i++) {

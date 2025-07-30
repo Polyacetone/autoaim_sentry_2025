@@ -18,6 +18,9 @@
 #include <autoaim_common_definitions/common_definitions.hpp>
 
 class PnPSolver {
+using ArmorDetection = hw_sentry_interfaces::msg::ArmorDetection;
+using BuffDetection = hw_sentry_interfaces::msg::BuffDetection;
+
 public:
     /*!
         @brief 设置相机的内参和畸变矩阵
@@ -26,7 +29,7 @@ public:
     void set_cam_matrix(const cv::Mat intrinsic, const cv::Mat distortion);
 
     std::vector<tf2::Transform> solve_pnp(
-        const std::vector<hw_sentry_interfaces::msg::ArmorDetection>& detections,
+        const std::variant<std::vector<ArmorDetection>, std::vector<BuffDetection>>& detections,
         const std::tuple<float, float, float>& gimbal_ypr,
         const double timestamp = 0,
         const std::shared_ptr<LSTMPoseSmoothing> lstm = nullptr
@@ -34,7 +37,7 @@ public:
 
 private:
     void solve_pnp_cv(
-        const std::vector<hw_sentry_interfaces::msg::ArmorDetection>& detections,
+        const std::variant<std::vector<ArmorDetection>, std::vector<BuffDetection>>& detections,
         std::vector<std::array<cv::Mat, 2>>& rvecs,
         std::vector<std::array<cv::Mat, 2>>& tvecs,
         std::vector<std::array<float, 2>>& reprojerrs
@@ -49,12 +52,11 @@ private:
 
     int select_solution_prior_angle(
         const std::array<Eigen::Quaternionf, 2>& rotations,
-        const std::array<float, 2>& reprojerrs,
         const std::tuple<float, float, float>& gimbal_ypr,
         const float prior_pitch
     ) const;
 
-    int select_solution_lstm(
+    Eigen::Quaternionf refine_solution_lstm(
         const std::array<Eigen::Quaternionf, 2>& rotations,
         const std::array<float, 2>& reprojerrs,
         const float dt,
@@ -72,6 +74,8 @@ private:
     static constexpr float HEIGHT = 0.05603f;
     static constexpr float BIG_WIDTH = 0.231f;
     static constexpr float SMALL_WIDTH = 0.136f;
+    static constexpr float BUFF_WIDTH = 0.114f;
+
     // 装甲板坐标系：前x，左y，上z
     const std::vector<cv::Point3f> SMALL_POINTS {
         {0, SMALL_WIDTH / 2, HEIGHT / 2},
@@ -84,6 +88,12 @@ private:
         {0, BIG_WIDTH / 2, -HEIGHT / 2},
         {0, -BIG_WIDTH / 2, -HEIGHT / 2},
         {0, -BIG_WIDTH / 2, HEIGHT / 2}
+    };
+    const std::vector<cv::Point3f> BUFF_POINTS {
+        {0, 0, BUFF_WIDTH},
+        {0, BUFF_WIDTH, 0},
+        {0, 0, -BUFF_WIDTH},
+        {0, -BUFF_WIDTH, 0},
     };
 
     cv::Mat cam_intrinsic_ = (cv::Mat_<float>(3, 3) << 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);

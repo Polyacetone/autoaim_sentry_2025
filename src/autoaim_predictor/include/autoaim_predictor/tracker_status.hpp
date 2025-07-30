@@ -3,7 +3,12 @@
 #include <opencv2/opencv.hpp>
 #include <termcolor/termcolor.hpp>
 
-enum class StatusType : int { CONVERGING, TRACKING, TEMP_LOST, LOST };
+enum class StatusType : int {
+    CONVERGING = 0,
+    TRACKING = 1,
+    TEMP_LOST = 2,
+    LOST = 3
+};
 
 class TrackerStatus {
 public:

@@ -3,12 +3,14 @@
 OpenVINOInferEngine::OpenVINOInferEngine(
     const std::string& model_path,
     const std::string& device_name,
+    const int num_colors,
+    const int num_labels,
+    const int num_keypoints,
     const float conf_threshold,
     const float nms_threshold
-) {
-    conf_threshold_ = conf_threshold;
-    nms_threshold_ = nms_threshold;
-
+):  
+    num_colors_(num_colors), num_labels_(num_labels), num_keypoints_(num_keypoints),
+    conf_threshold_(conf_threshold), nms_threshold_(nms_threshold) {
     ov::Core core;
     std::shared_ptr<ov::Model> model = core.read_model(model_path);
     ov::preprocess::PrePostProcessor ppp = ov::preprocess::PrePostProcessor(model);
@@ -34,138 +36,66 @@ OpenVINOInferEngine::OpenVINOInferEngine(
     infer_request_ = compiled_model_.create_infer_request();
     input_image_height_ = compiled_model_.input().get_shape()[1];
     input_image_width_ = compiled_model_.input().get_shape()[2];
-}
-
-void OpenVINOInferEngine::preprocess() {
-    try {
-        if (input_image_height_ != input_image_.rows || input_image_width_ != input_image_.cols) {
-            throw std::runtime_error("input image size does not match model requirements");
-        }
-        ov::Tensor input_tensor = ov::Tensor(
-            compiled_model_.input().get_element_type(),
-            compiled_model_.input().get_shape(),
-            input_image_.data
-        );
-        infer_request_.set_input_tensor(input_tensor);
-    } catch (const std::exception& e) {
-        std::cerr << "Exception in preprocess: " << e.what() << std::endl;
-    } catch (...) {
-        std::cerr << "Unknown exception in preprocess" << std::endl;
+    const int output_cols = compiled_model_.output().get_shape()[2];
+    if (output_cols != (4 + num_colors_ * num_labels_ + num_keypoints_ * 2)) {
+        throw std::runtime_error("invalid output tensor shape");
     }
 }
 
-void OpenVINOInferEngine::infer() {
+std::vector<Detection> OpenVINOInferEngine::infer(const cv::Mat& input_image) {
+    if (input_image_height_ != input_image.rows || input_image_width_ != input_image.cols) {
+        throw std::runtime_error("invalid input image size");
+    }
+    ov::Tensor input_tensor = ov::Tensor(
+        compiled_model_.input().get_element_type(),
+        compiled_model_.input().get_shape(),
+        input_image.data
+    );
+    infer_request_.set_input_tensor(input_tensor);
     infer_request_.infer();
-}
-
-void OpenVINOInferEngine::postprocess() {
     const ov::Tensor& output_tensor = infer_request_.get_output_tensor();
     const ov::Shape output_shape = output_tensor.get_shape();
     const int out_rows = output_shape[1];
     const int out_cols = output_shape[2];
-    if (out_cols != 36) {
-        std::cerr << "Error in postprocess: output columns != 36" << std::endl;
-        return;
-    }
-    const cv::Mat output_mat(out_rows, out_cols, CV_32F, output_tensor.data<float>());
-    std::vector<hw_sentry_interfaces::msg::ArmorDetection> detections_before_nms;
-    std::vector<cv::Rect> boxes;
+    std::vector<cv::Rect> bboxes;
     std::vector<float> confidences;
-    std::vector<int> indices;
+    std::vector<Detection> detections_before_nms;
     for (int i = 0; i < out_rows; i++) {
-        // 输出向量格式：x1, y1, x2, y2, 24个类别的confidence, 8个key_pts.xy
-        const cv::Mat row = output_mat.row(i).colRange(0, 36);
-
-        const cv::Mat scores = row.colRange(4, 28);
-        double max_score;
-        cv::Point max_point;
-        cv::minMaxLoc(scores, nullptr, &max_score, nullptr, &max_point);
-        const float confidence = static_cast<float>(max_score);
-        const int class_id = max_point.x;
-        if (confidence < conf_threshold_) {
-            continue;
+        const std::span<float> row(output_tensor.data<float>() + i * out_cols, out_cols);
+        const auto max_conf = std::max_element(row.begin() + 4, row.begin() + 4 + num_colors_ * num_labels_);
+        const cv::Rect bbox(row[0], row[1], row[2], row[3]);
+        const float confidence = *max_conf;
+        if (confidence < conf_threshold_) continue;
+        const int color = (max_conf - row.begin() - 4) / num_labels_;
+        const int label = (max_conf - row.begin() - 4) % num_labels_;
+        std::vector<cv::Point2f> keypoints;
+        for (int j = 0; j < num_keypoints_; j++) {
+            keypoints.emplace_back(
+                row[4 + num_colors_ * num_labels_ + j * 2],
+                row[4 + num_colors_ * num_labels_ + j * 2 + 1]
+            );
         }
+        bboxes.emplace_back(bbox);
         confidences.emplace_back(confidence);
-
-        const float box_x = row.at<float>(0, 0);
-        const float box_y = row.at<float>(0, 1);
-        const float box_w = row.at<float>(0, 2);
-        const float box_h = row.at<float>(0, 3);
-        boxes.emplace_back(box_x, box_y, box_w, box_h);
-
-        hw_sentry_interfaces::msg::ArmorDetection detection;
-        detection.confidence = confidence;
-        detection.color = class_id / 8; // blue, red, gray
-        detection.label = class_id % 8; // S, 1, 2, 3, 4, outpost, basesmall, basebig
-        detection.tl.x = row.at<float>(0, 28);
-        detection.tl.y = row.at<float>(0, 29);
-        detection.bl.x = row.at<float>(0, 30);
-        detection.bl.y = row.at<float>(0, 31);
-        detection.br.x = row.at<float>(0, 32);
-        detection.br.y = row.at<float>(0, 33);
-        detection.tr.x = row.at<float>(0, 34);
-        detection.tr.y = row.at<float>(0, 35);
-        detections_before_nms.emplace_back(detection);
+        detections_before_nms.emplace_back(color, label, confidence, keypoints);
     }
-
-    cv::dnn::NMSBoxes(boxes, confidences, conf_threshold_, nms_threshold_, indices);
-    armor_detections_.clear();
-    for (const auto index: indices) {
+    std::vector<int> indices;
+    cv::dnn::NMSBoxes(bboxes, confidences, conf_threshold_, nms_threshold_, indices);
+    std::vector<Detection> detections;
+    for (const int index: indices) {
         const auto det = detections_before_nms[index];
-        // 过滤角点回归到画面外的情况
-        if (det.tl.x < 0 || det.tl.y < 0)
-            continue;
-        if (det.tr.x > input_image_width_ || det.tr.y < 0)
-            continue;
-        if (det.bl.x < 0 || det.bl.y > input_image_height_)
-            continue;
-        if (det.br.x > input_image_width_ || det.br.y > input_image_height_)
-            continue;
-        armor_detections_.emplace_back(det);
+        bool is_valid = true;
+        for (int i = 0; i < num_keypoints_; i++) {
+            if (det.keypoints[i].x > input_image_width_ || det.keypoints[i].x < 0) {
+                is_valid = false;
+                break;
+            }
+            if (det.keypoints[i].y > input_image_height_ || det.keypoints[i].y < 0) {
+                is_valid = false;
+                break;
+            }
+        }
+        if (is_valid) detections.emplace_back(detections_before_nms[index]);
     }
-}
-
-cv::Mat OpenVINOInferEngine::debug_draw_armors() const {
-    cv::Mat image = input_image_.clone();
-    const std::vector<std::string> name = {
-        "Sentry",
-        "1",
-        "2",
-        "3",
-        "4",
-        "Outpost",
-        "Base small",
-        "Base big",
-    };
-    // blue, red, gray
-    const std::vector<cv::Scalar> colors =
-        {cv::Scalar(255, 0, 0), cv::Scalar(0, 0, 255), cv::Scalar(114, 114, 114)};
-    for (const auto& detection: armor_detections_) {
-        cv::Point2f kpts[4] {
-            cv::Point2f(detection.tl.x, detection.tl.y),
-            cv::Point2f(detection.bl.x, detection.bl.y),
-            cv::Point2f(detection.br.x, detection.br.y),
-            cv::Point2f(detection.tr.x, detection.tr.y)
-        };
-        cv::line(image, kpts[0], kpts[1], colors[detection.color], 2);
-        cv::line(image, kpts[1], kpts[2], colors[detection.color], 2);
-        cv::line(image, kpts[2], kpts[3], colors[detection.color], 2);
-        cv::line(image, kpts[3], kpts[0], colors[detection.color], 2);
-        cv::line(image, kpts[0], kpts[2], colors[detection.color], 1);
-        cv::line(image, kpts[1], kpts[3], colors[detection.color], 1);
-        cv::drawMarker(image, kpts[0], cv::Scalar(255, 255, 0), cv::MARKER_DIAMOND, 4, 2);
-        cv::drawMarker(image, kpts[1], cv::Scalar(255, 0, 255), cv::MARKER_DIAMOND, 4, 2);
-        cv::drawMarker(image, kpts[2], cv::Scalar(0, 255, 255), cv::MARKER_DIAMOND, 4, 2);
-        cv::drawMarker(image, kpts[3], cv::Scalar(0, 255, 0), cv::MARKER_DIAMOND, 4, 2);
-        cv::putText(
-            image,
-            name[detection.label] + " " + std::to_string(detection.confidence).substr(0, 4),
-            cv::Point(kpts[0].x - 5, kpts[0].y - 15),
-            cv::FONT_HERSHEY_TRIPLEX,
-            0.7,
-            cv::Scalar(255, 255, 255),
-            1
-        );
-    }
-    return image;
+    return detections;
 }

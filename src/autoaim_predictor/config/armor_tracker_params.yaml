@@ -41,8 +41,9 @@ armor_tracker:
     delta_yaw_update_threshold: 0.3
     enter_antispin_palstance: 2.5
     exit_antispin_palstance: 1.0
-    antispin_follow_angle: 0.5
-    antispin_shoot_angle: 0.45
+    antispin_shoot_angle: 0.35
+    antispin_out_of_shoot_angle_threshold: 4
+    antispin_in_shoot_angle_threshold: 4
     radius_filter_ratio: 0.95
     height_filter_ratio: 0.95
     axis_filter_ratio: 0.9
@@ -70,7 +71,7 @@ armor_tracker:
         cols: 2
         dt: f
         data: [ 1e-0,  0, 
-                0,  2e+1 ]
+                0,  1e+1 ]
       measurement_noise: !!opencv-matrix
         rows: 1
         cols: 1
@@ -78,11 +79,12 @@ armor_tracker:
         data: [ 1e-1 ]
 
   outpost_observer:
-    radius: 0.25
+    radius: 0.273
     switch_armor_angle: 1.0
     delta_yaw_update_threshold: 0.2
-    outpost_follow_angle: 0.7
-    outpost_can_shoot_angle: 0.65
+    outpost_shoot_angle: 0.6
+    outpost_out_of_shoot_angle_threshold: 5
+    outpost_in_shoot_angle_threshold: 5
     kf_center:
       process_noise: !!opencv-matrix
         rows: 6
@@ -91,9 +93,9 @@ armor_tracker:
         data: [ 1e-1,  0,  0,  0,  0,  0,
                 0,  1e-1,  0,  0,  0,  0,
                 0,  0,  1e-1,  0,  0,  0,
-                0,  0,  0,  1e-0,  0,  0,
-                0,  0,  0,  0,  1e-0,  0,
-                0,  0,  0,  0,  0,  1e-0 ]
+                0,  0,  0,  5e-1,  0,  0,
+                0,  0,  0,  0,  5e-1,  0,
+                0,  0,  0,  0,  0,  5e-1 ]
       measurement_noise: !!opencv-matrix
         rows: 3
         cols: 3
@@ -107,7 +109,7 @@ armor_tracker:
         cols: 2
         dt: f
         data: [ 1e-1,  0, 
-                0,  2e-0 ]
+                0,  1e-0 ]
       measurement_noise: !!opencv-matrix
         rows: 1
         cols: 1

@@ -2,10 +2,11 @@
   ros__parameters:
     enable_fps: false
     enable_labeled_image: true
-    default_mode: 0 # 没收到决策消息时的默认模式，决策死掉也会回到该模式。-1:null, 0:armor, 1:buff, 2:dart
+    default_mode: 0 # 没收到决策消息时的默认模式，决策死掉也会回到该模式。-1:null, 0:armor, 1:small_buff, 2:big_buff, 3:dart
     decision_fallback_timeout: 1.0 # 多长时间没收到决策消息就切换回默认模式
 
-    model_path: "20250519v11.xml"
+    armor_model_path: "armor/20250728v11.xml"
+    buff_model_path: "buff/20250730v11.xml"
     device_name: "NPU"
     confidence_threshold: 0.4
     nms_threshold: 0.4

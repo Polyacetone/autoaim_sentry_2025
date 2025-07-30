@@ -1,7 +1,9 @@
 /**:
   ros__parameters:
-    enable_lstm_smoothing: true
-    lstm_smoothing_model: "v10.onnx"
+    basis_frame_id: "chassis"
+
+    enable_lstm_smoothing: false
+    lstm_smoothing_model: "v11.onnx"
 
     ### Subscribe topics
     camera_info_topic: "autoaim/camera/camera_info"
