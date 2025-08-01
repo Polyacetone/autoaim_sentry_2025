@@ -7,11 +7,10 @@ buff_tracker:
   temp_lost_return_frames: 5
   
   small_buff_status:
-    max_temp_lost_frames: 30
-    max_converging_frames: 50
+    max_temp_lost_frames: 20
+    max_converging_frames: 20
   
   small_buff_observer:
-    small_buff_speed: 1.047197551 # 60deg/s
     switch_buff_angle: 0.8
     R_center_filter_ratio: 0.1
     kf_angle:

@@ -42,7 +42,6 @@ public:
     void write_predictor_status(hw_sentry_interfaces::msg::PredictorStatus& status) const;
 
 private:
-    float SMALL_BUFF_SPEED; // 小buff的旋转速度
     float SWITCH_BUFF_ANGLE; // 切换buff的角度阈值
 
     std::unique_ptr<KF<1>> kf_angle_;

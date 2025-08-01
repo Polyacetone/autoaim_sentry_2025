@@ -36,6 +36,10 @@ enum class AutoaimMode: int {
 
 namespace defs {
 
+constexpr float OUTPOST_RADIUS = 0.273;
+constexpr float BUFF_RADIUS = 0.7;
+constexpr float SMALL_BUFF_PALSTANCE = 1.047197551;
+
 constexpr float armor_pitch(ArmorType t) {
     if (t == ArmorType::NONE) [[unlikely]] throw std::invalid_argument("invalid armor type: NONE");
     return (t == ArmorType::OUTPOST) ? -0.2618 : 0.2618;

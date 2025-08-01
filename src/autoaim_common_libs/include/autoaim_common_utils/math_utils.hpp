@@ -24,6 +24,11 @@ static constexpr double square(const double x) {
     return x * x;
 }
 
+// 符号
+static constexpr int sign(const int x) {
+    return (x > 0) - (x < 0);
+}
+
 // 把角度（弧度制）修正到-pi~pi之间
 static constexpr double rad_period_correction(const double rad) {
     return rad + round((-rad) / (2.0 * M_PI)) * (2.0 * M_PI);

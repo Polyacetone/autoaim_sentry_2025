@@ -150,8 +150,6 @@ CarObserver::CarObserver(const cv::FileNode& fn) {
     ENTER_ANTISPIN_PALSTANCE = static_cast<float>(fn["enter_antispin_palstance"]);
     EXIT_ANTISPIN_PALSTANCE = static_cast<float>(fn["exit_antispin_palstance"]);
     ANTISPIN_SHOOT_ANGLE = static_cast<float>(fn["antispin_shoot_angle"]);
-    ANTISPIN_OUT_OF_SHOOT_ANGLE_THRESHOLD = static_cast<int>(fn["antispin_out_of_shoot_angle_threshold"]);
-    ANTISPIN_IN_SHOOT_ANGLE_THRESHOLD = static_cast<int>(fn["antispin_in_shoot_angle_threshold"]);
     float radius_filter_ratio = static_cast<float>(fn["radius_filter_ratio"]);
     float height_filter_ratio = static_cast<float>(fn["height_filter_ratio"]);
     float axis_filter_ratio = static_cast<float>(fn["axis_filter_ratio"]);
@@ -171,7 +169,7 @@ void CarObserver::reset() {
     main_observing_armor_id_ = 0;
     accumulated_yaw_ = 0;
     prev_main_observing_yaw_ = 0;
-    out_of_shoot_angle_count_ = 0;
+    is_in_antispin_shoot_range_ = false;
     for (int i = 0; i < 4; i++) {
         height_[i]->reset();
         radius_[i]->reset();
@@ -366,15 +364,28 @@ std::tuple<Vector3f, bool> CarObserver::predict_shoot_pos(
             target_armor_id = i;
         }
     }
-    if (abs(target_angle_to_gimbal) > ANTISPIN_SHOOT_ANGLE) {
-        out_of_shoot_angle_count_++;
-        in_shoot_angle_count_ = 0;
+    if (kf_yaw_->derivative().value() > 0) {
+        if (is_in_antispin_shoot_range_) {
+            if (target_angle_to_gimbal > ANTISPIN_SHOOT_ANGLE) {
+                is_in_antispin_shoot_range_ = false;
+            }
+        } else {
+            if (-ANTISPIN_SHOOT_ANGLE < target_angle_to_gimbal && target_angle_to_gimbal < 0) {
+                is_in_antispin_shoot_range_ = true;
+            }
+        }
     } else {
-        out_of_shoot_angle_count_ = 0;
-        in_shoot_angle_count_++;
+        if (is_in_antispin_shoot_range_) {
+            if (target_angle_to_gimbal < -ANTISPIN_SHOOT_ANGLE) {
+                is_in_antispin_shoot_range_ = false;
+            }
+        } else {
+            if (0 < target_angle_to_gimbal && target_angle_to_gimbal < ANTISPIN_SHOOT_ANGLE) {
+                is_in_antispin_shoot_range_ = true;
+            }
+        }
     }
-    if (out_of_shoot_angle_count_ < ANTISPIN_OUT_OF_SHOOT_ANGLE_THRESHOLD
-        && in_shoot_angle_count_ > ANTISPIN_IN_SHOOT_ANGLE_THRESHOLD) { // 跟随射击
+    if (is_in_antispin_shoot_range_) { // 跟随射击
         // 最面向我们的装甲板在basis下的预测yaw角
         const float target_angle_to_basis =
             utils::rad_period_correction(target_angle_to_gimbal + gimbal_yaw_to_basis);
@@ -388,7 +399,7 @@ std::tuple<Vector3f, bool> CarObserver::predict_shoot_pos(
         return {target, true};
     } else { // 去下一块装甲板出现位置准备射击
         const float next_target_angle_to_basis = utils::rad_period_correction(
-            (kf_yaw_->value().value() > 0 ? -1 : 1) * ANTISPIN_SHOOT_ANGLE
+            (-utils::sign(kf_yaw_->value().value())) * ANTISPIN_SHOOT_ANGLE
             + gimbal_yaw_to_basis
         );
         // 这里要直接用target_armor_id而不是下一块的id取radius和height
@@ -474,12 +485,9 @@ void CarObserver::write_predictor_status(hw_sentry_interfaces::msg::PredictorSta
 ***********************************************************************************/
 
 OutpostObserver::OutpostObserver(const cv::FileNode& fn) {
-    RADIUS = static_cast<float>(fn["radius"]);
     SWITCH_ARMOR_ANGLE = static_cast<float>(fn["switch_armor_angle"]);
     DELTA_YAW_UPDATE_THRESHOLD = static_cast<float>(fn["delta_yaw_update_threshold"]);
     OUTPOST_SHOOT_ANGLE = static_cast<float>(fn["outpost_shoot_angle"]);
-    OUTPOST_OUT_OF_SHOOT_ANGLE_THRESHOLD = static_cast<int>(fn["outpost_out_of_shoot_angle_threshold"]);
-    OUTPOST_IN_SHOOT_ANGLE_THRESHOLD = static_cast<int>(fn["outpost_in_shoot_angle_threshold"]);
     kf_center_ = std::make_unique<KF<3>>(fn["kf_center"]);
     kf_yaw_ = std::make_unique<KF<1>>(fn["kf_yaw"]);
     reset();
@@ -489,6 +497,7 @@ void OutpostObserver::reset() {
     is_armor_switched_ = false;
     accumulated_yaw_ = 0;
     prev_main_observing_yaw_ = 0;
+    is_in_outpost_shoot_range_ = false;
     kf_center_->reset();
     kf_yaw_->reset();
 }
@@ -498,7 +507,7 @@ void OutpostObserver::initialize(const std::vector<Armor>& armors) {
     accumulated_yaw_ = armors[0].yaw;
     prev_main_observing_yaw_ = accumulated_yaw_;
     kf_yaw_->initialize(Scalarf(accumulated_yaw_));
-    Vector3f car_center = calc_car_center(armors[0], RADIUS, Vector3f::UnitZ(), 0);
+    Vector3f car_center = calc_car_center(armors[0], defs::OUTPOST_RADIUS, Vector3f::UnitZ(), 0);
     kf_center_->initialize(car_center);
 }
 
@@ -524,7 +533,7 @@ void OutpostObserver::update(const std::vector<Armor>& armors) {
     if (std::abs(delta_yaw) < DELTA_YAW_UPDATE_THRESHOLD) {
         kf_yaw_->update(Scalarf(accumulated_yaw_));
     }
-    Vector3f car_center = calc_car_center(armors[0], RADIUS, Vector3f::UnitZ(), 0);
+    Vector3f car_center = calc_car_center(armors[0], defs::OUTPOST_RADIUS, Vector3f::UnitZ(), 0);
     kf_center_->update(car_center);
     prev_main_observing_yaw_ = armors[0].yaw;
 }
@@ -564,15 +573,28 @@ std::tuple<Vector3f, bool> OutpostObserver::predict_shoot_pos(
             target_angle_to_gimbal = pred_angle_to_gimbal;
         }
     }
-    if (abs(target_angle_to_gimbal) > OUTPOST_SHOOT_ANGLE) {
-        out_of_shoot_angle_count_++;
-        in_shoot_angle_count_ = 0;
+    if (kf_yaw_->derivative().value() > 0) {
+        if (is_in_outpost_shoot_range_) {
+            if (target_angle_to_gimbal > OUTPOST_SHOOT_ANGLE) {
+                is_in_outpost_shoot_range_ = false;
+            }
+        } else {
+            if (-OUTPOST_SHOOT_ANGLE < target_angle_to_gimbal && target_angle_to_gimbal < 0) {
+                is_in_outpost_shoot_range_ = true;
+            }
+        }
     } else {
-        out_of_shoot_angle_count_ = 0;
-        in_shoot_angle_count_++;
+        if (is_in_outpost_shoot_range_) {
+            if (target_angle_to_gimbal < -OUTPOST_SHOOT_ANGLE) {
+                is_in_outpost_shoot_range_ = false;
+            }
+        } else {
+            if (0 < target_angle_to_gimbal && target_angle_to_gimbal < OUTPOST_SHOOT_ANGLE) {
+                is_in_outpost_shoot_range_ = true;
+            }
+        }
     }
-    if (out_of_shoot_angle_count_ < OUTPOST_OUT_OF_SHOOT_ANGLE_THRESHOLD
-        && in_shoot_angle_count_ > OUTPOST_IN_SHOOT_ANGLE_THRESHOLD) { // 跟随射击
+    if (is_in_outpost_shoot_range_) { // 跟随射击
         // 最面向我们的装甲板在basis下的预测yaw角
         const float target_angle_to_basis =
             utils::rad_period_correction(target_angle_to_gimbal + gimbal_yaw_to_basis);
@@ -580,13 +602,13 @@ std::tuple<Vector3f, bool> OutpostObserver::predict_shoot_pos(
             pred_car_center,
             Vector3f::UnitZ(),
             0,
-            RADIUS,
+            defs::OUTPOST_RADIUS,
             target_angle_to_basis
         );
         return {target, true};
     } else { // 去下一块装甲板出现位置准备射击
         const float next_target_angle_to_basis = utils::rad_period_correction(
-            (kf_yaw_->value().value() > 0 ? -1 : 1) * OUTPOST_SHOOT_ANGLE
+            (-utils::sign(kf_yaw_->value().value())) * OUTPOST_SHOOT_ANGLE
             + gimbal_yaw_to_basis
         );
         // 这里要直接用target_armor_id而不是下一块的id取radius和height
@@ -595,7 +617,7 @@ std::tuple<Vector3f, bool> OutpostObserver::predict_shoot_pos(
             pred_car_center,
             Vector3f::UnitZ(),
             0,
-            RADIUS,
+            defs::OUTPOST_RADIUS,
             next_target_angle_to_basis
         );
         return {target, false};
@@ -627,7 +649,7 @@ std::vector<std::tuple<Vector3f, Quaternionf>> OutpostObserver::get_all_armors()
             kf_center_->value(),
             Vector3f::UnitZ(),
             0,
-            RADIUS,
+            defs::OUTPOST_RADIUS,
             armor_yaw
         );
         armors.emplace_back(armor_pose);
@@ -637,7 +659,7 @@ std::vector<std::tuple<Vector3f, Quaternionf>> OutpostObserver::get_all_armors()
 
 void OutpostObserver::write_predictor_status(hw_sentry_interfaces::msg::PredictorStatus& status) const {
     for (unsigned i = 0; i < ARMORS_COUNT; i++) {
-        status.radius.emplace_back(RADIUS);
+        status.radius.emplace_back(defs::OUTPOST_RADIUS);
         status.height.emplace_back(0);
     }
     status.axis = utils::convert_to<geometry_msgs::msg::Point32>(Vector3f(0, 0, 1));
@@ -912,6 +934,8 @@ std::vector<std::tuple<Vector3f, Quaternionf>> ArmorTracker::get_all_armors() co
 void ArmorTracker::write_predictor_status(hw_sentry_interfaces::msg::PredictorStatus& status) const {
     status.mode = static_cast<int>(AutoaimMode::ARMOR);
     status.label = static_cast<int>(target_label_);
+    status.main_armor_center = utils::convert_to<geometry_msgs::msg::Point32>(kf_main_observing_armor_->value());
+    status.main_armor_velocity = utils::convert_to<geometry_msgs::msg::Point32>(kf_main_observing_armor_->derivative());
     if (target_label_ == ArmorType::OUTPOST) {
         status.tracker_status = static_cast<int>(outpost_status_->status());
         outpost_observer_->write_predictor_status(status);

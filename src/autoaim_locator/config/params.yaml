@@ -1,7 +1,5 @@
 /**:
   ros__parameters:
-    basis_frame_id: "chassis"
-
     enable_lstm_smoothing: false
     lstm_smoothing_model: "v11.onnx"
 

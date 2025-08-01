@@ -3,9 +3,6 @@
 using namespace Eigen;
 using Scalarf = Vector<float, 1>;
 
-static constexpr float BUFF_RADIUS = 0.7f; // Buff的半径
-static constexpr float ADJACENT_LEAF_ANGLE = 2 * M_PI / 5; // 相邻符叶的夹角
-
 /**********************************************************************************
 ***********************************    Utils    ***********************************
 ***********************************************************************************/
@@ -13,8 +10,8 @@ static constexpr float ADJACENT_LEAF_ANGLE = 2 * M_PI / 5; // 相邻符叶的夹
 Vector3f calc_leaf_position(Vector3f R_center, float angle) {
     Vector3f leaf_position;
     leaf_position.x() = R_center.x();
-    leaf_position.y() = R_center.y() - BUFF_RADIUS * std::cos(angle);
-    leaf_position.z() = R_center.z() + BUFF_RADIUS * std::sin(angle);
+    leaf_position.y() = R_center.y() - defs::BUFF_RADIUS * std::cos(angle);
+    leaf_position.z() = R_center.z() + defs::BUFF_RADIUS * std::sin(angle);
     return leaf_position;
 }
 
@@ -25,7 +22,7 @@ Vector3f calc_leaf_position(Vector3f R_center, float angle) {
 Buff::Buff(const tf2::Transform& buff_pose) {
     translation = utils::convert_to<Vector3f>(buff_pose.getOrigin());
     rotation = utils::convert_to<Quaternionf>(buff_pose.getRotation());
-    R_center = rotation * Vector3f(0, 0, -BUFF_RADIUS) + translation;
+    R_center = rotation * Vector3f(0, 0, -defs::BUFF_RADIUS) + translation;
     angle = std::atan2(translation.z() - R_center.z(), R_center.y() - translation.y());
 }
 
@@ -34,7 +31,6 @@ Buff::Buff(const tf2::Transform& buff_pose) {
 ***********************************************************************************/
 
 SmallBuffObserver::SmallBuffObserver(const cv::FileNode& fn) {
-    SMALL_BUFF_SPEED = static_cast<float>(fn["small_buff_speed"]);
     SWITCH_BUFF_ANGLE = static_cast<float>(fn["switch_buff_angle"]);
     R_center_ = std::make_unique<EMAF<3>>(fn["R_center_filter_ratio"]);
     kf_angle_ = std::make_unique<KF<1>>(fn["kf_angle"]);
@@ -79,7 +75,8 @@ Vector3f SmallBuffObserver::predict_shoot_pos(
     float fly_time = 0;
     int direction_sign = (kf_angle_->derivative().value() < 0) ? -1 : 1;
     for (int i = 0; i < 5; i++) {
-        const float pred_angle = kf_angle_->value().value() + direction_sign * SMALL_BUFF_SPEED * (img_to_fire_time + fly_time);
+        const float pred_angle = kf_angle_->value().value()
+            + direction_sign * defs::SMALL_BUFF_PALSTANCE * (img_to_fire_time + fly_time);
         Vector3f pred_leaf_position = calc_leaf_position(R_center_->value(), pred_angle);
         Vector3f target_to_fake_fric = pred_leaf_position - fric_to_gimbal_yaw;
         fly_time = std::get<1>(trajectory::get_pitch_air_frac(
@@ -89,7 +86,8 @@ Vector3f SmallBuffObserver::predict_shoot_pos(
         ));
     }
     float img_to_hit_time = img_to_fire_time + fly_time;
-    const float pred_angle = kf_angle_->value().value() + direction_sign * SMALL_BUFF_SPEED * img_to_hit_time;
+    const float pred_angle = kf_angle_->value().value()
+        + direction_sign * defs::SMALL_BUFF_PALSTANCE * img_to_hit_time;
     Vector3f pred_leaf_position = calc_leaf_position(R_center_->value(), pred_angle);
     return pred_leaf_position;
 }

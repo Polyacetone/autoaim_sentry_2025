@@ -6,7 +6,7 @@
     decision_fallback_timeout: 1.0 # 多长时间没收到决策消息就切换回默认模式
 
     armor_model_path: "armor/20250728v11.xml"
-    buff_model_path: "buff/20250730v11.xml"
+    buff_model_path: "buff/20250731v11.xml"
     device_name: "NPU"
     confidence_threshold: 0.4
     nms_threshold: 0.4

@@ -51,7 +51,7 @@ private:
 
     bool enable_print_state_, enable_visualization_marker_;
     float bullet_speed_;
-    float control_to_fire_time_;
+    float control_to_fire_time_armor_, control_to_fire_time_buff_;
     float shoot_compensate_pitch_, shoot_compensate_yaw_;
 
     std::unique_ptr<ArmorTracker> armor_tracker_;
@@ -86,7 +86,8 @@ PredictorNode::PredictorNode(const rclcpp::NodeOptions& options): Node("autoaim_
     enable_print_state_ = declare_parameter<bool>("enable_print_state");
     enable_visualization_marker_ = declare_parameter<bool>("enable_visualization_marker");
     bullet_speed_ = declare_parameter<float>("bullet_speed");
-    control_to_fire_time_ = declare_parameter<float>("control_to_fire_time");
+    control_to_fire_time_armor_ = declare_parameter<float>("control_to_fire_time_armor");
+    control_to_fire_time_buff_ = declare_parameter<float>("control_to_fire_time_buff");
     shoot_compensate_pitch_ = declare_parameter<float>("shoot_compensate_pitch");
     shoot_compensate_yaw_ = declare_parameter<float>("shoot_compensate_yaw");
     std::string poses_topic = declare_parameter<std::string>("poses_topic");
@@ -186,15 +187,15 @@ void PredictorNode::poses_callback(const Poses::SharedPtr msg) {
 
 std::tuple<Eigen::Vector3f, bool> PredictorNode::predict_armor_target(const rclcpp::Time& img_time) const {
     tf2::Transform chassis_to_basis;
-    if (current_basis_frame_id == "map") {
+    if (current_basis_frame_id == "odom") {
         if (!utils::try_lookup_tf(
             tf_buffer_,
-            "map",
+            "odom",
             "chassis",
             {},
             chassis_to_basis,
             [&](const std::string& err) {
-                RCLCPP_WARN(get_logger(), "Failed to lookup chassis to map: %s", err.c_str());
+                RCLCPP_WARN(get_logger(), "Failed to lookup chassis to odom: %s", err.c_str());
             }
         )) return {{Eigen::Vector3f(0, 0, 0)}, false};
     } else if (current_basis_frame_id == "chassis") {
@@ -233,7 +234,7 @@ std::tuple<Eigen::Vector3f, bool> PredictorNode::predict_armor_target(const rclc
 
     auto [target_to_basis_translation, can_shoot] = armor_tracker_->predict_shoot_pos(
         bullet_speed_,
-        now().seconds() - img_time.seconds() + control_to_fire_time_,
+        now().seconds() - img_time.seconds() + control_to_fire_time_armor_,
         utils::convert_to<Eigen::Vector3f>(fake_fric_to_bassis.getOrigin()),
         std::get<0>(gimbal_ypr)
     );
@@ -264,7 +265,7 @@ std::tuple<Eigen::Vector3f, bool> PredictorNode::predict_buff_target(const rclcp
 
     auto [target_to_gimbal_yaw_translation, can_shoot] = buff_tracker_->predict_shoot_pos(
         bullet_speed_,
-        now().seconds() - img_time.seconds() + control_to_fire_time_,
+        now().seconds() - img_time.seconds() + control_to_fire_time_buff_,
         utils::convert_to<Eigen::Vector3f>(fake_fric_to_gimbal_yaw.getOrigin())
     );
 

@@ -32,8 +32,6 @@ private:
     Poses solve_armor_detections(const Detections::SharedPtr msg);
     Poses solve_buff_detections(const Detections::SharedPtr msg);
 
-    std::string basis_frame_id_;
-
     ArmorType current_locating_label_ = ArmorType::NONE;
 
     std::unique_ptr<PnPSolver> pnp_solver_;
@@ -54,10 +52,6 @@ LocatorNode::LocatorNode(const rclcpp::NodeOptions& options): Node("autoaim_loca
     tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
     pnp_solver_ = std::make_unique<PnPSolver>();
     
-    basis_frame_id_ = declare_parameter<std::string>("basis_frame_id");
-    if (basis_frame_id_ != "map" && basis_frame_id_ != "chassis") {
-        throw std::invalid_argument("invalid basis frame id");
-    }
     bool enable_lstm_smoothing = declare_parameter<bool>("enable_lstm_smoothing");
     if (enable_lstm_smoothing) {
         std::string model_name = declare_parameter<std::string>("lstm_smoothing_model");
@@ -136,19 +130,19 @@ Poses LocatorNode::solve_armor_detections(const Detections::SharedPtr msg) {
     )) return poses;
 
     tf2::Transform chassis_to_basis;
-    poses.header.frame_id = basis_frame_id_;
-    if (basis_frame_id_ == "map") {
-        utils::try_lookup_tf(
-            tf_buffer_,
-            "map",
-            "chassis",
-            {},
-            chassis_to_basis,
-            [&](const std::string& err) {
-                RCLCPP_WARN(get_logger(), "Failed to lookup chassis to map: %s", err.c_str());
-            }
-        );
-    } else if (basis_frame_id_ == "chassis") {
+    if (utils::try_lookup_tf(
+        tf_buffer_,
+        "odom",
+        "chassis",
+        {},
+        chassis_to_basis,
+        [&](const std::string& err) {
+            RCLCPP_WARN(get_logger(), "Failed to lookup chassis to odom: %s", err.c_str());
+        }
+    )) {
+        poses.header.frame_id = "odom";
+    } else {
+        poses.header.frame_id = "chassis";
         chassis_to_basis.setIdentity();
     }
 

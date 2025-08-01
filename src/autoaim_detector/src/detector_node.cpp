@@ -166,7 +166,7 @@ cv::Mat DetectorNode::draw_labeled_image(
 ) const {
     cv::Mat img = input_image.clone();
     const std::vector<std::string> armor_label =
-        {"Sentry", "1", "2", "3", "4", "Outpost", "Base small", "Base big"};
+        {"Sentry", "1", "2", "3", "4", "Outpost", "Base"};
     const std::vector<std::string> buff_label = {"Inactive", "Active"};
     const std::vector<cv::Scalar> colors =
         {cv::Scalar(255, 0, 0), cv::Scalar(0, 0, 255), cv::Scalar(114, 114, 114)};
@@ -236,6 +236,7 @@ std::vector<ArmorDetection> DetectorNode::to_armor_detections(const std::vector<
         ArmorDetection armor_det;
         armor_det.color = det.color;
         armor_det.label = det.label;
+        if (armor_det.label == 7) armor_det.label = 6;
         armor_det.confidence = det.confidence;
         armor_det.tl.x = det.keypoints[0].x;
         armor_det.tl.y = det.keypoints[0].y;

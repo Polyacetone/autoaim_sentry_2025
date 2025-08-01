@@ -233,6 +233,14 @@ void RecorderNode::draw_info_on_img(const PredictorStatus::SharedPtr msg, cv::Ma
         // 左下角画装甲板跟踪器具体信息
         std::sprintf(
             buf,
+            "MainArmor: (%3.0f, %3.0f, %3.0f) += (%3.0f, %3.0f, %3.0f)",
+            msg->main_armor_center.x * 100, msg->main_armor_center.y * 100, msg->main_armor_center.z * 100,
+            msg->main_armor_velocity.x * 100, msg->main_armor_velocity.y * 100, msg->main_armor_velocity.z * 100
+        );
+        text_left_align(img, buf, Point(0, 305), WHITE);
+
+        std::sprintf(
+            buf,
             "Center: (%3.0f, %3.0f, %3.0f) += (%3.0f, %3.0f, %3.0f)",
             msg->center.x * 100, msg->center.y * 100, msg->center.z * 100,
             msg->velocity.x * 100, msg->velocity.y * 100, msg->velocity.z * 100
