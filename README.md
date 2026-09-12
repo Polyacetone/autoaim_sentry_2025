@@ -1,6 +1,9 @@
 # autoaim_sentry_2025
 
-本仓库存储2025赛季Hello World战队哨兵自瞄代码，代码以及本文档的作者均为@Polyacetone。
+本仓库存储2025赛季Hello World战队哨兵自瞄代码，基于ROS2 Jazzy。
+
+> [!WARNING]
+> ~~由于作者懒~~项目并没有完善的部署流程，所以最好的使用方式是~~借助agent~~看看其中的思路而不是直接部署运行。
 
 ## 节点简介和相互关系
 
@@ -59,9 +62,3 @@ colcon build --symlink-install --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -
 ## 运行时依赖
 
 autoaim_camera需要海康相机驱动来连接海康相机。autoaim_detector需要Intel的GPU和NPU来运行推理部分。autoaim_locator和autoaim_predictor等需要一个TF树来查询相机相对于世界系的位姿（这个TF树主要由导航部分维护，所以如果你需要完整功能的话还需要开启导航部分。不过调试的时候可以有替代办法，即开启hw_sentry_robot_descriptions和hw_sentry_serial_driver，让hw_sentry_serial_driver发送假的IMU信息）。
-
-## 注意事项
-
-本仓库是2025赛季的存档，理论上你不应该往这里提交，文档和注释错误除外。
-
-在编写新赛季自瞄代码的时候（实际上编写任何代码时都应该这样）请务必注意**遵守已有的代码规范**（如果你看已有的代码不爽，其实也可以自己写一个新的）。例如：尽可能地使用新的C++特性，这通常会带来性能或者可读性的优化（一个例子是autoaim_common_libs里的convert_utils.hpp，利用了C++20的concept实现模板约束，提升可读性和可维护性）；对于一些可以复用的东西应适当抽象，以提升可读性。
